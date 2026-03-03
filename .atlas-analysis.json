@@ -1,0 +1,119 @@
+{
+  "projectType": "ai-ml",
+  "projectName": "EigenBench",
+  "projectDescription": "A black-box framework for quantifying value alignment across language models using pairwise comparisons, Bradley-Terry-Davidson models, and EigenTrust consensus scoring",
+  "theme": "aspen",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4f46e5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/overview",
+              "concepts/pipeline",
+              "concepts/constitutions",
+              "concepts/eigentrust"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/run-spec",
+              "guides/datasets",
+              "guides/collection",
+              "guides/training",
+              "guides/outputs"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/sampling-strategies",
+              "advanced/btd-models",
+              "advanced/custom-constitutions",
+              "advanced/caching"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Evaluation",
+            "pages": [
+              "api/eval/collect",
+              "api/eval/flows",
+              "api/eval/samplers"
+            ]
+          },
+          {
+            "group": "Training",
+            "pages": [
+              "api/train/bt-models",
+              "api/train/train"
+            ]
+          },
+          {
+            "group": "Trust & Scoring",
+            "pages": [
+              "api/trust/eigentrust"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config/run-spec",
+              "api/config/datasets",
+              "api/config/constitutions"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utils/comparisons",
+              "api/utils/transcripts"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Black-box value alignment measurement without ground-truth labels",
+    "Pairwise comparison collection with LLM-as-judge evaluation",
+    "Bradley-Terry-Davidson (BTD) model training for preference modeling",
+    "EigenTrust consensus aggregation for alignment scores",
+    "Configurable constitutions defining value systems",
+    "Multiple sampling strategies (random, adaptive, uniform)",
+    "Response caching for efficient re-evaluation",
+    "Comprehensive visualization and analysis outputs"
+  ],
+  "publicApiSurface": [
+    "scripts/run.py - Main entry point for running experiments",
+    "pipeline.eval.collect.collect_core_evaluations() - Collect scenario evaluations",
+    "pipeline.eval.flows.collect_responses_only() - Collect model responses",
+    "pipeline.train.train.train_vector_bt() - Train BT/BTD models",
+    "pipeline.train.bt_models.VectorBT - Bradley-Terry model",
+    "pipeline.train.bt_models.VectorBTD - BTD with tie support",
+    "pipeline.train.bt_models.CriteriaVectorBTD - Criterion-conditioned BTD",
+    "pipeline.trust.eigentrust.eigentrust() - Compute EigenTrust scores",
+    "pipeline.trust.eigentrust.compute_trust_matrix() - Compute trust matrix",
+    "pipeline.config.run_spec.load_run_spec() - Load experiment configuration",
+    "pipeline.eval.samplers.select_sampler() - Select sampling strategy",
+    "pipeline.utils.comparisons.extract_comparisons_with_ties_criteria() - Extract comparison data"
+  ]
+}
