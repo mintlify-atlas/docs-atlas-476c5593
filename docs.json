@@ -69,14 +69,16 @@
             "pages": [
               "api/eval/collect",
               "api/eval/flows",
-              "api/eval/samplers"
+              "api/eval/samplers",
+              "api/eval/criteria-collectors"
             ]
           },
           {
             "group": "Training",
             "pages": [
               "api/train/bt-models",
-              "api/train/train"
+              "api/train/train",
+              "api/train/plots"
             ]
           },
           {
@@ -98,6 +100,12 @@
             "pages": [
               "api/utils/comparisons",
               "api/utils/transcripts"
+            ]
+          },
+          {
+            "group": "Providers",
+            "pages": [
+              "api/providers/openrouter"
             ]
           }
         ]

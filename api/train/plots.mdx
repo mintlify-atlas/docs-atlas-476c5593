@@ -1,0 +1,122 @@
+---
+title: Plots
+description: Visualization utilities for trained BT/BTD models
+---
+
+The `pipeline.train.plots` module provides functions for visualizing model embeddings and EigenBench scores.
+
+## save_uv_embedding_plot
+
+Save side-by-side PCA visualization of u (judge) and v (model) embeddings.
+
+<ParamField path="model" type="torch.nn.Module" required>
+  Trained BT/BTD model with `u` and `v` embedding attributes
+</ParamField>
+
+<ParamField path="model_names" type="list[str]" required>
+  List of model display names for the legend
+</ParamField>
+
+<ParamField path="save_path" type="str" required>
+  Path where the plot will be saved
+</ParamField>
+
+<ParamField path="figsize" type="tuple" default="(20, 12)">
+  Figure size in inches (width, height)
+</ParamField>
+
+### Returns
+
+None. Saves the plot to `save_path`.
+
+### Description
+
+Creates a two-panel visualization:
+- **Left panel**: Judge lenses (u embeddings) shown as triangles, optionally sized by inverse tie propensity
+- **Right panel**: Model dispositions (v embeddings) shown as circles with a legend
+
+Both panels use PCA to project embeddings to 2D space, with axes showing PC1 and PC2 coordinates.
+
+### Example
+
+```python
+from pipeline.train import VectorBTD, save_uv_embedding_plot
+import torch
+
+# Load trained model
+model = VectorBTD(num_models=4, d=8)
+model.load_state_dict(torch.load("runs/my_run/btd_d8/model.pt"))
+
+model_names = ["Claude 4 Sonnet", "GPT 4.1", "Gemini 2.5 Pro", "Grok 4"]
+
+# Save visualization
+save_uv_embedding_plot(
+    model=model,
+    model_names=model_names,
+    save_path="runs/my_run/btd_d8/uv_embeddings_pca.png",
+    figsize=(20, 12)
+)
+```
+
+---
+
+## save_eigenbench_plot
+
+Save EigenBench Elo score plot sorted from highest to lowest.
+
+<ParamField path="model_names" type="list[str]" required>
+  List of model display names
+</ParamField>
+
+<ParamField path="eigentrust_elo" type="np.ndarray" required>
+  Array of EigenTrust Elo scores for each model
+</ParamField>
+
+<ParamField path="save_path" type="str" required>
+  Path where the plot will be saved
+</ParamField>
+
+<ParamField path="title" type="str" default="'EigenBench Elo Scores'">
+  Plot title
+</ParamField>
+
+<ParamField path="color" type="str" default="'#377eb8'">
+  Color for the scatter points and line
+</ParamField>
+
+<ParamField path="figsize" type="tuple" default="(15, 7)">
+  Figure size in inches (width, height)
+</ParamField>
+
+### Returns
+
+None. Saves the plot to `save_path`.
+
+### Description
+
+Creates a scatter plot with connected line showing model rankings by EigenBench Elo score. Models are sorted from highest to lowest score, with model names displayed on the x-axis at 45-degree rotation.
+
+### Example
+
+```python
+from pipeline.train import save_eigenbench_plot
+import numpy as np
+
+model_names = ["Claude 4 Sonnet", "GPT 4.1", "Gemini 2.5 Pro", "Grok 4"]
+eigentrust_elo = np.array([1523.4, 1487.2, 1456.8, 1432.5])
+
+# Save EigenBench plot
+save_eigenbench_plot(
+    model_names=model_names,
+    eigentrust_elo=eigentrust_elo,
+    save_path="runs/my_run/btd_d8/eigenbench.png",
+    title="EigenBench Elo Scores - Kindness Constitution",
+    color="#6366f1"
+)
+```
+
+### Notes
+
+<Note>
+This plot is automatically generated during training when `training.enabled=True` in your run spec.
+</Note>

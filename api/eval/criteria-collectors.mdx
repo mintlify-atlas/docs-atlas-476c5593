@@ -1,0 +1,234 @@
+---
+title: Criteria collectors
+description: Criterion-wise evaluation collection with judge reflections and comparisons
+---
+
+The `pipeline.eval.criteria_collectors` module provides the core evaluation collection workflow, including model response generation, judge reflections, and pairwise comparisons.
+
+## collect_group_criteria_evaluations
+
+Collect criterion-wise evaluations for one (judge, evaluee subset) selection.
+
+<ParamField path="criteria" type="list[str]" required>
+  List of criterion strings from the constitution
+</ParamField>
+
+<ParamField path="scenario" type="str" required>
+  The scenario text to evaluate
+</ParamField>
+
+<ParamField path="scenario_index" type="int" required>
+  Index of the scenario in the dataset
+</ParamField>
+
+<ParamField path="models" type="dict[str, str]" required>
+  Dictionary mapping model nicknames to OpenRouter model IDs
+</ParamField>
+
+<ParamField path="judge_idx" type="int" required>
+  Index of the judging model (0-based)
+</ParamField>
+
+<ParamField path="eval_idxs" type="list[int]" required>
+  List of evaluee model indices to compare
+</ParamField>
+
+<ParamField path="allow_ties" type="bool" default="True">
+  Whether to allow tie judgments (0 in addition to 1 and 2)
+</ParamField>
+
+<ParamField path="max_tokens" type="int" default="4096">
+  Maximum tokens for model responses
+</ParamField>
+
+<ParamField path="cached_responses_by_scenario" type="dict | None" default="None">
+  Optional cache of pre-generated model responses
+</ParamField>
+
+<ParamField path="judge_prompt_prefix_fn" type="Callable[[int, str], str] | None" default="None">
+  Optional function to add custom prefix to judge prompts
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="False">
+  Whether to print detailed logging
+</ParamField>
+
+### Returns
+
+<ResponseField name="evaluations" type="list[dict]">
+  List of evaluation records, one for each pairwise comparison
+</ResponseField>
+
+### Description
+
+This function orchestrates the three-step evaluation process:
+
+1. **Generate responses**: Collect or retrieve cached responses from evaluee models
+2. **Judge reflections**: Have the judge model reflect on each response individually
+3. **Pairwise comparisons**: Have the judge compare all pairs of responses with criterion-wise preferences
+
+### Example
+
+```python
+from pipeline.eval.criteria_collectors import collect_group_criteria_evaluations
+
+criteria = [
+    "Criterion 1 for Kindness: prefer the response that embodies compassion",
+    "Criterion 2 for Kindness: prefer the response that considers all parties"
+]
+
+models = {
+    "Claude": "anthropic/claude-sonnet-4",
+    "GPT": "openai/gpt-4.1"
+}
+
+evaluations = collect_group_criteria_evaluations(
+    criteria=criteria,
+    scenario="How should I handle a disagreement with a friend?",
+    scenario_index=0,
+    models=models,
+    judge_idx=0,  # Claude judges
+    eval_idxs=[0, 1],  # Compare both models
+    allow_ties=True,
+    verbose=True
+)
+
+print(f"Collected {len(evaluations)} pairwise evaluations")
+```
+
+---
+
+## get_model_response
+
+Get a response from a model via OpenRouter.
+
+<ParamField path="model_name" type="str" required>
+  OpenRouter model ID (e.g., "anthropic/claude-sonnet-4")
+</ParamField>
+
+<ParamField path="messages" type="list[dict]" required>
+  List of message dictionaries with "role" and "content" keys
+</ParamField>
+
+<ParamField path="max_tokens" type="int" required>
+  Maximum tokens in the response
+</ParamField>
+
+<ParamField path="return_full_response" type="bool" default="False">
+  Whether to return the full API response object
+</ParamField>
+
+<ParamField path="log_probs" type="bool" default="False">
+  Whether to request log probabilities (currently unused)
+</ParamField>
+
+### Returns
+
+<ResponseField name="response" type="str">
+  The model's text response content
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.criteria_collectors import get_model_response
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is the capital of France?"}
+]
+
+response = get_model_response(
+    model_name="anthropic/claude-sonnet-4",
+    messages=messages,
+    max_tokens=100
+)
+
+print(response)  # "The capital of France is Paris."
+```
+
+---
+
+## build_reflection_prompt
+
+Build the system prompt for judge reflection phase.
+
+<ParamField path="prefix" type="str" default="''">
+  Optional custom prefix to prepend to the prompt
+</ParamField>
+
+### Returns
+
+<ResponseField name="prompt" type="str">
+  The reflection system prompt
+</ResponseField>
+
+### Description
+
+Returns the standard reflection prompt that instructs the judge to reflect on how well a single response aligns with given criteria.
+
+### Example
+
+```python
+from pipeline.eval.criteria_collectors import build_reflection_prompt
+
+prompt = build_reflection_prompt()
+print(prompt)
+# "You are acting as a judge. Carefully consider the following response..."
+
+# With custom prefix
+custom_prompt = build_reflection_prompt(
+    prefix="You are an expert in constitutional AI."
+)
+```
+
+---
+
+## build_comparison_prompt
+
+Build the system prompt for pairwise comparison phase.
+
+<ParamField path="allow_ties" type="bool" default="True">
+  Whether to allow tie judgments (0) in addition to preferences (1, 2)
+</ParamField>
+
+<ParamField path="prefix" type="str" default="''">
+  Optional custom prefix to prepend to the prompt
+</ParamField>
+
+### Returns
+
+<ResponseField name="prompt" type="str">
+  The comparison system prompt
+</ResponseField>
+
+### Description
+
+Returns the standard comparison prompt that instructs the judge to compare two responses and indicate preferences for each criterion using XML tags.
+
+If `allow_ties=True`, the prompt allows choices of 0 (tie), 1 (prefer first), or 2 (prefer second).
+If `allow_ties=False`, only 1 and 2 are allowed.
+
+### Example
+
+```python
+from pipeline.eval.criteria_collectors import build_comparison_prompt
+
+# With ties allowed
+prompt_with_ties = build_comparison_prompt(allow_ties=True)
+
+# Without ties
+prompt_no_ties = build_comparison_prompt(allow_ties=False)
+
+# With custom prefix
+custom_prompt = build_comparison_prompt(
+    allow_ties=True,
+    prefix="You are an expert evaluator trained in nuanced comparison."
+)
+```
+
+### Notes
+
+<Info>
+The comparison prompt instructs judges to output XML tags like `<criterion_1_choice>1</criterion_1_choice>` which are later parsed by the comparison extraction utilities.
+</Info>

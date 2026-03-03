@@ -1,0 +1,135 @@
+---
+title: OpenRouter
+description: OpenRouter API client for model inference
+---
+
+The `pipeline.providers.openrouter` module provides a wrapper for making API calls to OpenRouter.
+
+## get_openrouter_response
+
+Send a chat completion request via OpenRouter.
+
+<ParamField path="messages" type="list[dict]" required>
+  List of message dictionaries with "role" and "content" keys following OpenAI format
+</ParamField>
+
+<ParamField path="model" type="str" required>
+  OpenRouter model ID (e.g., "anthropic/claude-sonnet-4", "openai/gpt-4.1")
+</ParamField>
+
+<ParamField path="temperature" type="float" default="1.0">
+  Sampling temperature (0.0 to 2.0)
+</ParamField>
+
+<ParamField path="max_tokens" type="int" default="1024">
+  Maximum tokens in the response
+</ParamField>
+
+<ParamField path="return_full_response" type="bool" default="False">
+  If True, return the full API response object; if False, return just the message content
+</ParamField>
+
+### Returns
+
+<ResponseField name="response" type="str | openai.ChatCompletion">
+  Either the message content string (default) or the full API response object
+</ResponseField>
+
+### Description
+
+This function wraps the OpenAI-compatible OpenRouter API. It automatically loads the `OPENROUTER_API_KEY` from environment variables using `python-dotenv`.
+
+If an error occurs during the API call, the function returns an error message string starting with "Error in OpenRouter API call:".
+
+### Example
+
+```python
+from pipeline.providers.openrouter import get_openrouter_response
+
+# Basic usage
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Explain quantum computing in simple terms."}
+]
+
+response = get_openrouter_response(
+    messages=messages,
+    model="anthropic/claude-sonnet-4",
+    temperature=0.7,
+    max_tokens=500
+)
+
+print(response)
+```
+
+### Multi-turn conversation
+
+```python
+from pipeline.providers.openrouter import get_openrouter_response
+
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is 2+2?"},
+    {"role": "assistant", "content": "2+2 equals 4."},
+    {"role": "user", "content": "What about 3+3?"}
+]
+
+response = get_openrouter_response(
+    messages=messages,
+    model="openai/gpt-4.1",
+    max_tokens=100
+)
+```
+
+### Full response object
+
+```python
+from pipeline.providers.openrouter import get_openrouter_response
+
+messages = [{"role": "user", "content": "Hello!"}]
+
+full_response = get_openrouter_response(
+    messages=messages,
+    model="anthropic/claude-sonnet-4",
+    return_full_response=True
+)
+
+print(full_response.usage.total_tokens)
+print(full_response.choices[0].message.content)
+```
+
+### Environment setup
+
+<Warning>
+You must set the `OPENROUTER_API_KEY` environment variable before using this function. Add it to a `.env` file in your project root:
+
+```bash
+OPENROUTER_API_KEY=your_key_here
+```
+</Warning>
+
+### Error handling
+
+```python
+from pipeline.providers.openrouter import get_openrouter_response
+
+response = get_openrouter_response(
+    messages=[{"role": "user", "content": "Test"}],
+    model="invalid/model-id"
+)
+
+if response.startswith("Error in OpenRouter API call:"):
+    print("API call failed:", response)
+else:
+    print("Success:", response)
+```
+
+### Notes
+
+<Info>
+EigenBench currently uses OpenRouter exclusively for model API access. All models in your run spec must be available via OpenRouter.
+</Info>
+
+<Note>
+The function automatically handles API key loading via `python-dotenv`, so ensure your `.env` file is in the correct location (project root or parent directories).
+</Note>
