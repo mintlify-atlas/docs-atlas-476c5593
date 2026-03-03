@@ -1,0 +1,254 @@
+---
+title: BT/BTD models
+description: Bradley-Terry and Bradley-Terry-Davidson model classes for pairwise comparison learning
+---
+
+This module provides PyTorch implementations of Bradley-Terry (BT) and Bradley-Terry-Davidson (BTD) models for learning from pairwise comparisons. Includes both legacy single-criterion models and criterion-conditioned variants.
+
+## VectorBT
+
+Standard Bradley-Terry model using dot product scoring.
+
+```python
+from pipeline.train.bt_models import VectorBT
+import torch
+
+model = VectorBT(num_models=10, d=32)
+i = torch.tensor([0])
+j = torch.tensor([1])
+k = torch.tensor([2])
+prob = model(i, j, k)  # P(j > k | i)
+```
+
+### Constructor
+
+<ParamField path="num_models" type="int" required>
+  Number of models/judges to embed
+</ParamField>
+
+<ParamField path="d" type="int" required>
+  Embedding dimension
+</ParamField>
+
+### forward
+
+Compute probability that model j is preferred over model k by judge i.
+
+```python
+prob = model.forward(i, j, k)
+```
+
+<ParamField path="i" type="Tensor" required>
+  Judge indices (batch)
+</ParamField>
+
+<ParamField path="j" type="Tensor" required>
+  First model indices (batch)
+</ParamField>
+
+<ParamField path="k" type="Tensor" required>
+  Second model indices (batch)
+</ParamField>
+
+<ResponseField name="output" type="Tensor">
+  Sigmoid probability that j is preferred over k, shape `(batch_size,)`
+</ResponseField>
+
+---
+
+## VectorBT_norm
+
+Bradley-Terry model using negative squared distance for scoring.
+
+```python
+from pipeline.train.bt_models import VectorBT_norm
+
+model = VectorBT_norm(num_models=10, d=32)
+prob = model(i, j, k)
+```
+
+### Constructor
+
+<ParamField path="num_models" type="int" required>
+  Number of models/judges to embed
+</ParamField>
+
+<ParamField path="d" type="int" required>
+  Embedding dimension
+</ParamField>
+
+### forward
+
+Compute probability using distance-based scoring: score = -||u_i - v||²
+
+```python
+prob = model.forward(i, j, k)
+```
+
+<ParamField path="i" type="Tensor" required>
+  Judge indices (batch)
+</ParamField>
+
+<ParamField path="j" type="Tensor" required>
+  First model indices (batch)
+</ParamField>
+
+<ParamField path="k" type="Tensor" required>
+  Second model indices (batch)
+</ParamField>
+
+<ResponseField name="output" type="Tensor">
+  Sigmoid probability that j is preferred over k, shape `(batch_size,)`
+</ResponseField>
+
+---
+
+## VectorBT_bias
+
+Bradley-Terry model with per-judge bias terms.
+
+```python
+from pipeline.train.bt_models import VectorBT_bias
+
+model = VectorBT_bias(num_models=10, d=32)
+prob = model(i, j, k)
+```
+
+### Constructor
+
+<ParamField path="num_models" type="int" required>
+  Number of models/judges to embed
+</ParamField>
+
+<ParamField path="d" type="int" required>
+  Embedding dimension
+</ParamField>
+
+### forward
+
+Compute probability with judge-specific bias term.
+
+```python
+prob = model.forward(i, j, k)
+```
+
+<ParamField path="i" type="Tensor" required>
+  Judge indices (batch)
+</ParamField>
+
+<ParamField path="j" type="Tensor" required>
+  First model indices (batch)
+</ParamField>
+
+<ParamField path="k" type="Tensor" required>
+  Second model indices (batch)
+</ParamField>
+
+<ResponseField name="output" type="Tensor">
+  Sigmoid probability that j is preferred over k, shape `(batch_size,)`
+</ResponseField>
+
+---
+
+## VectorBTD
+
+Bradley-Terry-Davidson model with tie support.
+
+```python
+from pipeline.train.bt_models import VectorBTD
+import torch.nn.functional as F
+
+model = VectorBTD(num_models=10, d=32)
+logits = model(i, j, k)
+probs = F.softmax(logits, dim=1)  # [P(tie), P(j>k), P(k>j)]
+```
+
+### Constructor
+
+<ParamField path="num_models" type="int" required>
+  Number of models/judges to embed
+</ParamField>
+
+<ParamField path="d" type="int" required>
+  Embedding dimension
+</ParamField>
+
+### forward
+
+Compute logits for three outcomes: tie, j wins, k wins.
+
+```python
+logits = model.forward(i, j, k)
+```
+
+<ParamField path="i" type="Tensor" required>
+  Judge indices (batch)
+</ParamField>
+
+<ParamField path="j" type="Tensor" required>
+  First model indices (batch)
+</ParamField>
+
+<ParamField path="k" type="Tensor" required>
+  Second model indices (batch)
+</ParamField>
+
+<ResponseField name="output" type="Tensor">
+  Logits tensor of shape `(batch_size, 3)` where columns are [tie, j>k, k>j]
+</ResponseField>
+
+---
+
+## CriteriaVectorBTD
+
+Criterion-conditioned Bradley-Terry-Davidson model.
+
+```python
+from pipeline.train.bt_models import CriteriaVectorBTD
+
+model = CriteriaVectorBTD(num_criteria=5, num_models=10, d=32)
+c = torch.tensor([0])  # criterion index
+logits = model(c, i, j, k)
+```
+
+### Constructor
+
+<ParamField path="num_criteria" type="int" required>
+  Number of evaluation criteria
+</ParamField>
+
+<ParamField path="num_models" type="int" required>
+  Number of models to embed
+</ParamField>
+
+<ParamField path="d" type="int" required>
+  Embedding dimension
+</ParamField>
+
+### forward
+
+Compute criterion-conditioned logits for three outcomes.
+
+```python
+logits = model.forward(c, i, j, k)
+```
+
+<ParamField path="c" type="Tensor" required>
+  Criterion indices (batch)
+</ParamField>
+
+<ParamField path="i" type="Tensor" required>
+  Judge indices (batch)
+</ParamField>
+
+<ParamField path="j" type="Tensor" required>
+  First model indices (batch)
+</ParamField>
+
+<ParamField path="k" type="Tensor" required>
+  Second model indices (batch)
+</ParamField>
+
+<ResponseField name="output" type="Tensor">
+  Logits tensor of shape `(batch_size, 3)` where columns are [tie, j>k, k>j]
+</ResponseField>

@@ -1,0 +1,142 @@
+---
+title: Run spec
+description: Load and normalize run specifications with folder-based defaults
+---
+
+The `run_spec` module provides utilities for loading and normalizing run specifications from either dotted module paths or file paths. It automatically applies folder-based defaults for paths and configuration.
+
+## load_run_spec
+
+Load `RUN_SPEC` from either a dotted module path or a Python file path.
+
+```python
+from pipeline.config.run_spec import load_run_spec
+
+spec, run_dir = load_run_spec("runs.example.spec")
+```
+
+<ParamField path="spec_ref" type="str" required>
+  Reference to the run spec, either as a dotted module path (e.g., `"runs.example.spec"`) or a file path (e.g., `"runs/my_run/spec.py"`)
+</ParamField>
+
+<ResponseField name="return" type="tuple[dict, Path]">
+  A tuple containing the normalized spec dictionary and the run directory Path
+</ResponseField>
+
+### Examples
+
+```python
+# Load from dotted module path
+spec, run_dir = load_run_spec("runs.example.spec")
+
+# Load from file path
+spec, run_dir = load_run_spec("runs/my_run/spec.py")
+
+# Convenience: "runs.my_run" resolves to "runs.my_run.spec"
+spec, run_dir = load_run_spec("runs.my_run")
+```
+
+## apply_run_defaults
+
+Return a normalized spec with run-folder defaults applied.
+
+```python
+from pipeline.config.run_spec import apply_run_defaults
+
+normalized, run_dir = apply_run_defaults(spec_ref, module_file, spec)
+```
+
+<ParamField path="spec_ref" type="str" required>
+  Reference string used to load the spec
+</ParamField>
+
+<ParamField path="module_file" type="str" required>
+  Path to the module file containing the spec
+</ParamField>
+
+<ParamField path="spec" type="dict" required>
+  The raw specification dictionary
+</ParamField>
+
+<ResponseField name="return" type="tuple[dict, Path]">
+  A tuple containing the normalized spec dictionary with defaults applied and the run directory Path
+</ResponseField>
+
+### Behavior
+
+- Sets default `evaluations_path` to `{run_dir}/evaluations.jsonl`
+- Resolves `cached_responses_path` relative to repository root if provided
+- Sets default `output_dir` for training to the run directory
+- Converts `verbose` to boolean (defaults to `False`)
+
+### Example
+
+```python
+spec = {
+    "name": "my_experiment",
+    "collection": {
+        "evaluations_path": "results.jsonl"
+    },
+    "training": {}
+}
+
+normalized, run_dir = apply_run_defaults(
+    "runs.my_experiment",
+    "/path/to/runs/my_experiment/__init__.py",
+    spec
+)
+
+print(normalized["collection"]["evaluations_path"])
+# Output: /path/to/runs/my_experiment/results.jsonl
+```
+
+## infer_run_name_and_dir
+
+Infer the run name and directory from the spec reference, module file path, and spec dictionary.
+
+```python
+from pipeline.config.run_spec import infer_run_name_and_dir
+
+run_name, run_dir = infer_run_name_and_dir(spec_ref, module_file, spec)
+```
+
+<ParamField path="spec_ref" type="str" required>
+  Reference string used to load the spec
+</ParamField>
+
+<ParamField path="module_file" type="str" required>
+  Path to the module file containing the spec
+</ParamField>
+
+<ParamField path="spec" type="dict" required>
+  The specification dictionary
+</ParamField>
+
+<ResponseField name="return" type="tuple[str, Path]">
+  A tuple containing the inferred run name and run directory Path
+</ResponseField>
+
+### Layout conventions
+
+**Package layout (recommended):**
+- `runs/<name>/__init__.py` → run_dir = `runs/<name>/`
+- `runs/<name>/spec.py` → run_dir = `runs/<name>/`
+- `runs/<name>/config.py` → run_dir = `runs/<name>/`
+
+**Legacy single-file layout:**
+- `runs/<name>.py` → run_dir = `runs/<name>/`
+
+### Example
+
+```python
+spec = {"name": "experiment_v2"}
+
+run_name, run_dir = infer_run_name_and_dir(
+    "runs.experiment",
+    "/workspace/runs/experiment/__init__.py",
+    spec
+)
+
+print(run_name)  # Output: experiment_v2
+print(run_dir)   # Output: /workspace/runs/experiment
+```

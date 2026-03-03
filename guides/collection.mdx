@@ -1,0 +1,394 @@
+---
+title: Evaluation collection
+description: Guide to configuring evaluation sampling and collection in EigenBench
+---
+
+The **collection** stage generates pairwise evaluations by having models judge each other's responses. The `collection` section of your run spec controls sampling strategies, group sizes, and caching behavior.
+
+## Basic configuration
+
+The minimal collection configuration:
+
+```python
+"collection": {
+    "enabled": True,
+}
+```
+
+With automatic defaults:
+- Evaluations saved to `runs/<run_name>/evaluations.jsonl`
+- Random judge/group sampling
+- Ties allowed
+- Groups of 4 evaluees per judgment
+- 1 judge group sampled per scenario
+
+## Configuration reference
+
+<ParamField path="enabled" type="boolean" default="true">
+  Whether to run the collection stage. Set to `False` for training-only mode.
+
+  ```python
+  "enabled": True
+  ```
+</ParamField>
+
+<ParamField path="evaluations_path" type="string" default="runs/<run_name>/evaluations.jsonl">
+  Path to the evaluations output file. Relative paths resolve from the run folder.
+
+  ```python
+  "evaluations_path": "custom/location/evals.jsonl"
+  ```
+</ParamField>
+
+<ParamField path="cached_responses_path" type="string" default="null">
+  Path to a pre-generated response cache. When set, responses are reused instead of regenerated.
+
+  ```python
+  "cached_responses_path": "data/responses/shared_cache.jsonl"
+  ```
+
+  See [Response caching](#response-caching) for details.
+</ParamField>
+
+<ParamField path="allow_ties" type="boolean" default="true">
+  Whether to allow judges to declare ties between responses.
+
+  ```python
+  "allow_ties": True  # 3-way choice: prefer A, prefer B, or tie
+  ```
+</ParamField>
+
+<ParamField path="group_size" type="integer" default="4">
+  Number of models evaluated together in each judgment batch.
+
+  ```python
+  "group_size": 4  # Judge compares 4 models' responses
+  ```
+</ParamField>
+
+<ParamField path="groups" type="integer" default="1">
+  Number of judge+group samples per scenario. Increase for more coverage.
+
+  ```python
+  "groups": 2  # Sample 2 different judge/evaluee groups per scenario
+  ```
+</ParamField>
+
+<ParamField path="sampler_mode" type="string" default="random_judge_group">
+  Sampling strategy for selecting judges and evaluees.
+
+  Options:
+  - `random_judge_group` - Random judge + one random group of evaluees (recommended)
+  - `adaptive_inverse_count` - Balances toward under-sampled judges/evaluees
+  - `uniform` - Uniform random selection
+
+  ```python
+  "sampler_mode": "random_judge_group"
+  ```
+</ParamField>
+
+<ParamField path="alpha" type="float" default="2.0">
+  Aggressiveness parameter for `adaptive_inverse_count` sampling. Higher values increase preference for under-sampled models.
+
+  ```python
+  "alpha": 2.0  # Practical range: 0.0 (uniform) to 3.0 (aggressive)
+  ```
+</ParamField>
+
+## Sampling strategies
+
+<AccordionGroup>
+  <Accordion title="Random judge group (recommended)" icon="shuffle" defaultOpen>
+    **Mode:** `random_judge_group`
+
+    Randomly selects one judge and one random group of evaluees.
+
+    ```python
+    "collection": {
+        "sampler_mode": "random_judge_group",
+        "group_size": 4,
+        "groups": 1,
+    }
+    ```
+
+    **Best for:** Most experiments. Provides good coverage with minimal complexity.
+
+    **How it works:**
+    1. Randomly select a judge model
+    2. Partition all models into groups of size `group_size`
+    3. Randomly select one group as evaluees
+  </Accordion>
+
+  <Accordion title="Adaptive inverse count" icon="scale-balanced">
+    **Mode:** `adaptive_inverse_count`
+
+    Balances sampling toward judges and evaluees that have been used less frequently.
+
+    ```python
+    "collection": {
+        "sampler_mode": "adaptive_inverse_count",
+        "group_size": 4,
+        "groups": 3,
+        "alpha": 2.0,
+    }
+    ```
+
+    **Best for:** Ensuring even coverage across all models when you have limited evaluation budget.
+
+    **Alpha parameter:**
+    - `alpha = 0.0` → Equivalent to uniform sampling
+    - `alpha = 1.0-2.0` → Practical range for most runs
+    - `alpha > 3.0` → Aggressive balancing
+
+    **How it works:**
+    1. Track judge/evaluee counts from previous evaluations
+    2. Compute inverse-count weights: `weight = 1 / (1 + count)^alpha`
+    3. Sample judges and evaluees proportional to weights
+  </Accordion>
+
+  <Accordion title="Uniform" icon="grid">
+    **Mode:** `uniform`
+
+    Pure random sampling without grouping structure.
+
+    ```python
+    "collection": {
+        "sampler_mode": "uniform",
+        "group_size": 4,
+    }
+    ```
+
+    **Best for:** Baseline comparisons and ablation studies.
+  </Accordion>
+</AccordionGroup>
+
+## Group size and coverage
+
+### Choosing group size
+
+The `group_size` parameter controls how many models are compared in each judgment:
+
+```python
+"group_size": 4  # Judge compares 4 models at once
+```
+
+<Note>
+  **Recommended default:** 4 models per group works well for most populations.
+</Note>
+
+**Tradeoffs:**
+- **Smaller groups (2-3):** More focused comparisons, but requires more groups for full coverage
+- **Larger groups (5+):** More comparisons per API call, but judgment quality may decrease
+
+### Increasing coverage
+
+**Increase `groups` first** before increasing `group_size`:
+
+```python
+# ✅ Recommended approach
+"group_size": 4,
+"groups": 3,  # 3 different judge/group samples per scenario
+
+# ⚠️ Less recommended
+"group_size": 8,  # Larger groups can reduce judgment quality
+"groups": 1,
+```
+
+Multiple groups provide:
+- More diverse judge perspectives
+- Better coverage of model pairs
+- More robust training signal
+
+## Response caching
+
+Response caching avoids regenerating model responses across experiments:
+
+<Steps>
+  <Step title="Generate the cache">
+    Create a cache-only run spec:
+
+    ```python runs/build_cache/spec.py
+    RUN_SPEC = {
+        "models": {...},
+        "dataset": {...},
+        "collection": {
+            "enabled": False,
+            "cached_responses_path": "data/responses/main_cache.jsonl",
+        },
+        "training": {
+            "enabled": False,
+        },
+    }
+    ```
+
+    Run it:
+    ```bash
+    python scripts/run.py runs.build_cache
+    ```
+
+    This creates `data/responses/main_cache.jsonl` with all model responses.
+  </Step>
+
+  <Step title="Use the cache">
+    Reference the cache in subsequent experiments:
+
+    ```python runs/experiment/spec.py
+    "collection": {
+        "enabled": True,
+        "cached_responses_path": "data/responses/main_cache.jsonl",
+    }
+    ```
+
+    The collection stage will reuse cached responses instead of calling model APIs.
+  </Step>
+</Steps>
+
+### Cache benefits
+
+<CardGroup cols={2}>
+  <Card title="Cost savings" icon="dollar-sign">
+    Avoid redundant API calls when running multiple experiments on the same scenarios.
+  </Card>
+  <Card title="Reproducibility" icon="repeat">
+    Lock in model responses for consistent comparisons across runs.
+  </Card>
+  <Card title="Speed" icon="bolt">
+    Skip response generation when iterating on collection or training parameters.
+  </Card>
+  <Card title="Sharing" icon="share-nodes">
+    Share response caches across team members or experiments.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Cache files can be large. A cache for 4 models × 1000 scenarios may be several hundred MB.
+</Warning>
+
+## Example configurations
+
+<CodeGroup>
+```python Minimal (defaults)
+"collection": {
+    "enabled": True,
+}
+```
+
+```python Standard experiment
+"collection": {
+    "enabled": True,
+    "allow_ties": True,
+    "group_size": 4,
+    "groups": 2,
+    "sampler_mode": "random_judge_group",
+}
+```
+
+```python High coverage
+"collection": {
+    "enabled": True,
+    "allow_ties": True,
+    "group_size": 4,
+    "groups": 5,  # More judge/group samples
+    "sampler_mode": "adaptive_inverse_count",
+    "alpha": 1.5,
+}
+```
+
+```python With caching
+"collection": {
+    "enabled": True,
+    "cached_responses_path": "data/responses/shared_cache.jsonl",
+    "allow_ties": True,
+    "group_size": 4,
+    "groups": 2,
+}
+```
+</CodeGroup>
+
+## Evaluation output format
+
+Evaluations are saved to `evaluations.jsonl` in JSONL format (one JSON object per line):
+
+```json
+{"scenario_index": 0, "criterion": 0, "judge": "Claude 4 Sonnet", "evaluees": ["GPT 4.1", "Gemini 2.5 Pro"], "winner": "GPT 4.1", ...}
+{"scenario_index": 0, "criterion": 0, "judge": "Claude 4 Sonnet", "evaluees": ["Grok 4", "GPT 4.1"], "winner": "tie", ...}
+...
+```
+
+Each evaluation record includes:
+- **scenario_index:** Index of the scenario being evaluated
+- **criterion:** Which constitution criterion was used
+- **judge:** Model that made the judgment
+- **evaluees:** Models being compared
+- **winner:** Preferred model or "tie"
+- Full prompt and response details
+
+## Monitoring collection
+
+With `verbose: True`, monitor collection progress:
+
+```python
+"verbose": True,
+```
+
+```bash
+Run: my_run
+Scenario selection: total=5000, selected=1000, start=0, count=1000
+Group round 1/2
+  Judge: Claude 4 Sonnet
+  Evaluees: [0, 1, 2, 3]
+Wrote 24 new evaluations for scenario_index=0 -> runs/my_run/evaluations.jsonl
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Start with random_judge_group" icon="shuffle">
+    For most experiments, the default sampling strategy works well:
+
+    ```python
+    "sampler_mode": "random_judge_group",
+    "group_size": 4,
+    "groups": 1,
+    ```
+
+    Only use adaptive sampling if you observe coverage issues.
+  </Accordion>
+
+  <Accordion title="Increase groups for more data" icon="layer-group">
+    Need more training data? Increase `groups` rather than `group_size`:
+
+    ```python
+    "groups": 3,  # Sample 3 judge/group combinations per scenario
+    ```
+  </Accordion>
+
+  <Accordion title="Cache responses for iteration" icon="hard-drive">
+    If you'll run multiple experiments on the same scenarios:
+
+    1. Build cache once
+    2. Reuse across all experiments
+    3. Iterate freely on sampling/training parameters
+  </Accordion>
+
+  <Accordion title="Allow ties by default" icon="handshake">
+    Forcing binary choices can introduce noise when responses are genuinely equivalent:
+
+    ```python
+    "allow_ties": True  # Recommended
+    ```
+
+    The BTD model handles ties naturally.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Training" icon="chart-line" href="/guides/training">
+    Configure BT/BTD model training
+  </Card>
+  <Card title="Outputs" icon="file-chart-line" href="/guides/outputs">
+    Understand evaluation outputs
+  </Card>
+</CardGroup>

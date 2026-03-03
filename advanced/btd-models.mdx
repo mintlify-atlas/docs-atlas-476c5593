@@ -1,0 +1,303 @@
+---
+title: BTD model variants
+description: Explanation of Bradley-Terry-Davison model variants in EigenBench
+---
+
+EigenBench implements several variants of the Bradley-Terry (BT) and Bradley-Terry-Davison (BTD) models for learning judge and evaluee embeddings from pairwise comparison data.
+
+## Model overview
+
+All models learn vector representations that capture:
+- **Judge preferences** (u vectors): How each judge evaluates responses
+- **Evaluee quality** (v vectors): How well each model's responses align with criteria
+
+<Info>
+  The recommended default is `btd_ties` (VectorBTD), which handles ties and draws in comparisons.
+</Info>
+
+## Bradley-Terry (BT) models
+
+BT models predict binary preferences without tie support.
+
+<Tabs>
+  <Tab title="VectorBT">
+    ### Vector BT (standard)
+
+    The standard vector-based Bradley-Terry model.
+
+    **Architecture:**
+    ```python
+    # From pipeline/train/bt_models.py:12
+    class VectorBT(nn.Module):
+        def __init__(self, num_models: int, d: int):
+            super().__init__()
+            self.u = nn.Embedding(num_models, d)  # Judge embeddings
+            self.v = nn.Embedding(num_models, d)  # Evaluee embeddings
+            
+            nn.init.normal_(self.u.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.v.weight, mean=0.0, std=0.1)
+    ```
+
+    **Forward pass:**
+    ```python
+    def forward(self, i, j, k):
+        u_i = self.u(i)  # Judge i
+        v_j = self.v(j)  # Evaluee j
+        v_k = self.v(k)  # Evaluee k
+        
+        score_j = torch.sum(u_i * v_j, dim=-1)  # Dot product
+        score_k = torch.sum(u_i * v_k, dim=-1)
+        return torch.sigmoid(score_j - score_k)  # P(j preferred over k)
+    ```
+
+    **When to use:**
+    - Comparisons without ties (`allow_ties: False`)
+    - Simpler model with fewer parameters
+    - Dot-product similarity preferred
+
+    **Configuration:**
+    ```python
+    "training": {
+        "model": "bt",  # Uses VectorBT
+        "dims": [2],
+    }
+    ```
+  </Tab>
+
+  <Tab title="VectorBT_norm">
+    ### Vector BT with L2 distance
+
+    BT variant using negative squared L2 distance instead of dot product.
+
+    **Architecture:**
+    ```python
+    # From pipeline/train/bt_models.py:31
+    class VectorBT_norm(nn.Module):
+        def __init__(self, num_models: int, d: int):
+            super().__init__()
+            self.u = nn.Embedding(num_models, d)
+            self.v = nn.Embedding(num_models, d)
+            
+            nn.init.normal_(self.u.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.v.weight, mean=0.0, std=0.1)
+    ```
+
+    **Forward pass:**
+    ```python
+    def forward(self, i, j, k):
+        u_i = self.u(i)
+        v_j = self.v(j)
+        v_k = self.v(k)
+        
+        score_j = -torch.sum((u_i - v_j) ** 2, dim=-1)  # Negative L2 distance
+        score_k = -torch.sum((u_i - v_k) ** 2, dim=-1)
+        return torch.sigmoid(score_j - score_k)
+    ```
+
+    **Key difference:**
+    Uses embedding space distance rather than angular similarity. Models whether judge and evaluee embeddings are close in Euclidean space.
+
+    <Note>
+      This variant is useful when L2 distance better captures the semantic relationship between judges and evaluees.
+    </Note>
+  </Tab>
+
+  <Tab title="VectorBT_bias">
+    ### Vector BT with judge bias
+
+    BT variant with per-judge bias terms.
+
+    **Architecture:**
+    ```python
+    # From pipeline/train/bt_models.py:50
+    class VectorBT_bias(nn.Module):
+        def __init__(self, num_models: int, d: int):
+            super().__init__()
+            self.u = nn.Embedding(num_models, d)
+            self.v = nn.Embedding(num_models, d)
+            self.b = nn.Embedding(num_models, 1)  # Per-judge bias
+            
+            nn.init.normal_(self.u.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.v.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.b.weight, mean=0.0, std=0.1)
+    ```
+
+    **Forward pass:**
+    ```python
+    def forward(self, i, j, k):
+        u_i = self.u(i)
+        v_j = self.v(j)
+        v_k = self.v(k)
+        b_i = self.b(i)  # Judge-specific bias
+        
+        score_j = torch.sum(u_i * v_j, dim=-1)
+        score_k = torch.sum(u_i * v_k, dim=-1)
+        return torch.sigmoid(score_j - score_k + b_i.squeeze(-1))  # Add bias
+    ```
+
+    **When to use:**
+    - When judges have systematic tendencies (e.g., lenient vs. strict)
+    - To capture judge-specific offsets beyond preference vectors
+    - For improved model fit when judges vary in baseline behavior
+
+    <Warning>
+      Adds `num_models` additional parameters - may require more data to train effectively.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Bradley-Terry-Davison (BTD) models
+
+BTD models extend BT to handle three outcomes: j preferred, k preferred, or tie.
+
+<Tabs>
+  <Tab title="VectorBTD">
+    ### Vector BTD (recommended)
+
+    The recommended model for EigenBench - handles ties naturally.
+
+    **Architecture:**
+    ```python
+    # From pipeline/train/bt_models.py:72
+    class VectorBTD(nn.Module):
+        def __init__(self, num_models: int, d: int):
+            super().__init__()
+            self.u = nn.Embedding(num_models, d)      # Judge embeddings
+            self.v = nn.Embedding(num_models, d)      # Evaluee embeddings
+            self.log_lambda = nn.Embedding(num_models, 1)  # Tie propensity
+            
+            nn.init.normal_(self.u.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.v.weight, mean=0.0, std=0.1)
+            nn.init.constant_(self.log_lambda.weight, 0.0)  # Start neutral
+    ```
+
+    **Forward pass:**
+    ```python
+    def forward(self, i, j, k):
+        u_i = self.u(i)
+        v_j = self.v(j)
+        v_k = self.v(k)
+        
+        score_j = torch.sum(u_i * v_j, dim=-1)
+        score_k = torch.sum(u_i * v_k, dim=-1)
+        
+        log_lambda_i = self.log_lambda(i).squeeze(-1)
+        tie_logit = log_lambda_i + 0.5 * (score_j + score_k)
+        logits = torch.stack([tie_logit, score_j, score_k], dim=1)
+        return logits  # [P(tie), P(j), P(k)]
+    ```
+
+    **Key features:**
+    - Returns 3-way logits (tie, j wins, k wins)
+    - `log_lambda` learns per-judge tie propensity
+    - Tie logit combines lambda with average quality
+
+    **When to use:**
+    - Default choice for EigenBench
+    - When `allow_ties: True` in collection config
+    - To capture genuine ambiguity in judgments
+
+    **Configuration:**
+    ```python
+    "collection": {
+        "allow_ties": True,
+    },
+    "training": {
+        "model": "btd_ties",  # Uses VectorBTD
+        "dims": [2],
+    }
+    ```
+  </Tab>
+
+  <Tab title="CriteriaVectorBTD">
+    ### Criterion-conditioned BTD
+
+    BTD variant with separate judge embeddings per criterion.
+
+    **Architecture:**
+    ```python
+    # From pipeline/train/bt_models.py:97
+    class CriteriaVectorBTD(nn.Module):
+        def __init__(self, num_criteria: int, num_models: int, d: int):
+            super().__init__()
+            # num_criteria * num_models separate judge embeddings
+            self.u = nn.Embedding(num_criteria * num_models, d)
+            self.v = nn.Embedding(num_models, d)  # Shared evaluee embeddings
+            self.log_lambda = nn.Embedding(num_criteria * num_models, 1)
+            
+            nn.init.normal_(self.u.weight, mean=0.0, std=0.1)
+            nn.init.normal_(self.v.weight, mean=0.0, std=0.1)
+            nn.init.constant_(self.log_lambda.weight, 0.0)
+    ```
+
+    **Forward pass:**
+    ```python
+    def forward(self, c, i, j, k):
+        num_models = self.v.num_embeddings
+        row_idx = c * num_models + i  # Criterion-specific judge embedding
+        
+        u_i = self.u(row_idx)  # Judge i for criterion c
+        v_j = self.v(j)
+        v_k = self.v(k)
+        
+        score_j = torch.sum(u_i * v_j, dim=-1)
+        score_k = torch.sum(u_i * v_k, dim=-1)
+        
+        log_lambda_i = self.log_lambda(row_idx).squeeze(-1)
+        tie_logit = log_lambda_i + 0.5 * (score_j + score_k)
+        logits = torch.stack([tie_logit, score_j, score_k], dim=1)
+        return logits
+    ```
+
+    **Key features:**
+    - Each judge has `num_criteria` separate preference vectors
+    - Evaluee embeddings are shared across criteria
+    - Models criterion-specific judging behavior
+
+    **When to use:**
+    - When judges behave very differently across criteria
+    - With multi-criterion constitutions
+    - For deeper analysis of criterion-specific preferences
+
+    **Configuration:**
+    ```python
+    "training": {
+        "separate_criteria": True,  # Uses CriteriaVectorBTD
+        "model": "btd_ties",
+    }
+    ```
+
+    <Warning>
+      This model has `num_criteria` times more parameters in judge embeddings. Requires sufficient evaluation data per criterion.
+    </Warning>
+  </Tab>
+</Tabs>
+
+## Model comparison
+
+| Model | Parameters | Ties support | Criterion-specific | Use case |
+|-------|------------|--------------|-------------------|----------|
+| VectorBT | 2 * num_models * d | No | No | Simple binary comparisons |
+| VectorBT_norm | 2 * num_models * d | No | No | L2 distance-based |
+| VectorBT_bias | 2 * num_models * d + num_models | No | No | Judge bias modeling |
+| **VectorBTD** | **2 * num_models * d + num_models** | **Yes** | **No** | **Default choice** |
+| CriteriaVectorBTD | (num_criteria + 1) * num_models * d + num_criteria * num_models | Yes | Yes | Multi-criterion analysis |
+
+## Initialization
+
+All models use the same initialization strategy:
+- **Embeddings** (u, v): Normal distribution (mean=0.0, std=0.1)
+- **Bias/log_lambda**: Normal (mean=0.0, std=0.1) or constant (0.0)
+
+See bt_models.py:18-19, 37-38, 57-59, 79-81, 106-108 for implementation.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Training configuration" icon="sliders" href="/guides/training">
+    Configure training hyperparameters
+  </Card>
+  <Card title="Sampling strategies" icon="shuffle" href="/advanced/sampling-strategies">
+    Learn about judge/evaluee sampling
+  </Card>
+</CardGroup>

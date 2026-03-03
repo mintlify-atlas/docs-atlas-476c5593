@@ -1,0 +1,214 @@
+---
+title: Installation
+description: Install EigenBench and configure your environment for running value alignment experiments
+---
+
+## Prerequisites
+
+<Note>
+  EigenBench requires Python 3.8 or higher. We recommend using Python 3.10+.
+</Note>
+
+Before installing EigenBench, ensure you have:
+
+- Python 3.8+ installed on your system
+- Access to [OpenRouter API](https://openrouter.ai/) for model evaluations
+- A terminal environment (Linux, macOS, or WSL on Windows)
+
+## Create a virtual environment
+
+We strongly recommend using a virtual environment to avoid dependency conflicts:
+
+<CodeGroup>
+```bash venv
+python -m venv .venv
+source .venv/bin/activate
+```
+
+```bash conda
+conda create -n eigenbench python=3.10
+conda activate eigenbench
+```
+</CodeGroup>
+
+## Install dependencies
+
+Upgrade pip and install the required packages:
+
+```bash
+pip install --upgrade pip
+pip install torch numpy scipy pandas scikit-learn matplotlib tqdm python-dotenv openai
+```
+
+### Dependency overview
+
+<AccordionGroup>
+  <Accordion title="Core dependencies">
+    - **torch**: Neural network training for BTD models
+    - **numpy**: Numerical computing and array operations
+    - **scipy**: Scientific computing and optimization
+    - **pandas**: Data manipulation and analysis
+    - **scikit-learn**: Machine learning utilities and train/test splitting
+  </Accordion>
+  
+  <Accordion title="Utilities">
+    - **matplotlib**: Visualization of training loss, embeddings, and alignment scores
+    - **tqdm**: Progress bars for long-running collection and training
+    - **python-dotenv**: Environment variable management for API keys
+  </Accordion>
+  
+  <Accordion title="API clients">
+    - **openai**: OpenRouter API client (uses OpenAI-compatible interface)
+  </Accordion>
+</AccordionGroup>
+
+## Configure API access
+
+<Warning>
+  EigenBench currently supports model evaluation exclusively through OpenRouter. Direct API access to other providers is not yet supported.
+</Warning>
+
+Create a `.env` file in your project root:
+
+```bash
+touch .env
+```
+
+Add your OpenRouter API key:
+
+```bash .env
+OPENROUTER_API_KEY=your_api_key_here
+```
+
+<Steps>
+  <Step title="Get an OpenRouter API key">
+    Sign up at [openrouter.ai](https://openrouter.ai/) and create an API key from your dashboard
+  </Step>
+  <Step title="Add the key to .env">
+    Copy your API key and paste it into the `.env` file as shown above
+  </Step>
+  <Step title="Verify configuration">
+    The key will be automatically loaded when you run EigenBench experiments
+  </Step>
+</Steps>
+
+## Clone the repository
+
+If you haven't already, clone the EigenBench repository:
+
+```bash
+git clone https://github.com/yourusername/eigenbench.git
+cd eigenbench
+```
+
+## Verify installation
+
+Verify that all dependencies are correctly installed:
+
+```python verify.py
+import torch
+import numpy as np
+import pandas as pd
+from openai import OpenAI
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+# Check CUDA availability (optional)
+print(f"PyTorch version: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+
+# Verify API key is loaded
+api_key = os.getenv("OPENROUTER_API_KEY")
+if api_key:
+    print("✓ OpenRouter API key found")
+else:
+    print("✗ OpenRouter API key not found - check your .env file")
+```
+
+Run the verification script:
+
+```bash
+python verify.py
+```
+
+You should see output confirming your PyTorch installation and API key configuration.
+
+## GPU support (optional)
+
+<Info>
+  GPU acceleration is optional. EigenBench works well on CPU for most use cases, but GPU can speed up training for large experiments.
+</Info>
+
+If you have a CUDA-compatible GPU and want to enable GPU acceleration:
+
+```bash
+# Install PyTorch with CUDA support (example for CUDA 11.8)
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+```
+
+Visit [pytorch.org](https://pytorch.org/get-started/locally/) to get the correct installation command for your CUDA version.
+
+## Directory structure
+
+After installation, your EigenBench directory should look like:
+
+```text
+EigenBench/
+├── pipeline/           # Core pipeline modules
+│   ├── eval/          # Evaluation collection
+│   ├── train/         # BTD model training
+│   ├── trust/         # EigenTrust computation
+│   ├── utils/         # I/O and extraction utilities
+│   ├── config/        # Configuration loaders
+│   └── providers/     # API provider clients
+├── scripts/           # Runnable scripts
+│   └── run.py         # Main entrypoint
+├── runs/              # Experiment configurations
+│   └── example/       # Example run spec
+├── data/              # Data files
+│   ├── constitutions/ # Value system definitions
+│   ├── scenarios/     # Scenario datasets
+│   └── responses/     # Cached model responses
+├── .env               # API keys (you create this)
+└── .venv/             # Virtual environment
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="ModuleNotFoundError when importing">
+    Ensure your virtual environment is activated and all dependencies are installed:
+    ```bash
+    source .venv/bin/activate  # or conda activate eigenbench
+    pip install --upgrade pip
+    pip install torch numpy scipy pandas scikit-learn matplotlib tqdm python-dotenv openai
+    ```
+  </Accordion>
+  
+  <Accordion title="API key not found">
+    Verify that:
+    - Your `.env` file exists in the project root
+    - The file contains `OPENROUTER_API_KEY=your_key`
+    - There are no quotes around the API key
+    - You're running scripts from the project root directory
+  </Accordion>
+  
+  <Accordion title="CUDA errors">
+    If you encounter CUDA-related errors but want to run on CPU:
+    ```python
+    # In your spec.py, explicitly set device to CPU
+    "training": {
+        "device": "cpu",
+        # ... other settings
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<Card title="Quick start guide" icon="rocket" href="/quickstart">
+  Run your first EigenBench experiment in under 5 minutes
+</Card>

@@ -1,0 +1,337 @@
+---
+title: Datasets
+description: Guide to using and configuring scenario datasets in EigenBench
+---
+
+Datasets in EigenBench are collections of **scenarios** - prompts or situations that models respond to before being judged. The `dataset` section of your run spec controls which scenarios are used and how they're sliced.
+
+## Dataset configuration
+
+The `dataset` section in your run spec defines the source and selection of scenarios:
+
+```python
+"dataset": {
+    "path": "data/scenarios/reddit_questions.json",
+    "start": 0,
+    "count": 1000,
+    "shuffle": False,
+    "shuffle_seed": 42,
+}
+```
+
+### Required fields
+
+<ParamField path="path" type="string" required>
+  Path to the JSON file containing scenarios. Relative paths resolve from the repository root.
+
+  ```python
+  "path": "data/scenarios/reddit_questions.json"
+  ```
+</ParamField>
+
+### Optional fields
+
+<ParamField path="start" type="integer" default="0">
+  Zero-based offset to start reading scenarios from. Useful for splitting large datasets across multiple runs.
+
+  ```python
+  "start": 100  # Skip first 100 scenarios
+  ```
+</ParamField>
+
+<ParamField path="count" type="integer" default="all remaining">
+  Number of scenarios to use after applying the start offset. If omitted, all remaining scenarios are used.
+
+  ```python
+  "count": 500  # Use 500 scenarios
+  ```
+</ParamField>
+
+<ParamField path="shuffle" type="boolean" default="false">
+  Whether to shuffle scenarios before slicing. Applied before `start` and `count`.
+
+  ```python
+  "shuffle": True
+  ```
+</ParamField>
+
+<ParamField path="shuffle_seed" type="integer" default="null">
+  Random seed for reproducible shuffling. Only used when `shuffle` is `True`.
+
+  ```python
+  "shuffle_seed": 42  # Reproducible shuffle
+  ```
+</ParamField>
+
+## Scenario format
+
+Scenario files are JSON arrays containing scenario objects. Each scenario must have:
+
+```json
+[
+  {
+    "prompt": "What are some ways to practice mindfulness in daily life?"
+  },
+  {
+    "prompt": "How can I be more supportive of a friend going through a difficult time?"
+  }
+]
+```
+
+<Note>
+  The only required field is `prompt`. Additional fields are preserved but not used by the pipeline.
+</Note>
+
+## Dataset slicing examples
+
+<AccordionGroup>
+  <Accordion title="Use all scenarios" defaultOpen>
+    ```python
+    "dataset": {
+        "path": "data/scenarios/questions.json",
+    }
+    ```
+
+    Processes all scenarios in the file from start to finish.
+  </Accordion>
+
+  <Accordion title="Use first 100 scenarios">
+    ```python
+    "dataset": {
+        "path": "data/scenarios/questions.json",
+        "count": 100,
+    }
+    ```
+
+    Takes scenarios at indices 0-99.
+  </Accordion>
+
+  <Accordion title="Use scenarios 100-199">
+    ```python
+    "dataset": {
+        "path": "data/scenarios/questions.json",
+        "start": 100,
+        "count": 100,
+    }
+    ```
+
+    Skips first 100 scenarios, then takes next 100.
+  </Accordion>
+
+  <Accordion title="Random sample of 500">
+    ```python
+    "dataset": {
+        "path": "data/scenarios/questions.json",
+        "shuffle": True,
+        "shuffle_seed": 42,
+        "count": 500,
+    }
+    ```
+
+    Shuffles all scenarios with seed 42, then takes first 500. Reproducible across runs.
+  </Accordion>
+
+  <Accordion title="Split dataset across runs">
+    **Run 1:**
+    ```python
+    "dataset": {
+        "path": "data/scenarios/large_dataset.json",
+        "start": 0,
+        "count": 1000,
+    }
+    ```
+
+    **Run 2:**
+    ```python
+    "dataset": {
+        "path": "data/scenarios/large_dataset.json",
+        "start": 1000,
+        "count": 1000,
+    }
+    ```
+
+    Process different portions of a large dataset in parallel runs.
+  </Accordion>
+</AccordionGroup>
+
+## Order of operations
+
+Scenario selection happens in this order:
+
+<Steps>
+  <Step title="Load scenarios">
+    Read all scenarios from the JSON file at `path`.
+  </Step>
+
+  <Step title="Shuffle (if enabled)">
+    If `shuffle` is `True`, randomize scenario order using `shuffle_seed`.
+  </Step>
+
+  <Step title="Apply start offset">
+    Skip the first `start` scenarios.
+  </Step>
+
+  <Step title="Apply count limit">
+    Take up to `count` scenarios from the remaining set.
+  </Step>
+</Steps>
+
+**Example:** For a dataset with 10,000 scenarios:
+
+```python
+"dataset": {
+    "path": "data/scenarios/large.json",
+    "shuffle": True,
+    "shuffle_seed": 42,
+    "start": 100,
+    "count": 500,
+}
+```
+
+1. Load all 10,000 scenarios
+2. Shuffle with seed 42
+3. Skip first 100 (positions 0-99 in shuffled order)
+4. Take next 500 (positions 100-599 in shuffled order)
+
+## Creating scenario datasets
+
+Create a scenario dataset by saving a JSON array of prompt objects:
+
+```python create_dataset.py
+import json
+
+scenarios = [
+    {"prompt": "What makes a good friend?"},
+    {"prompt": "How can I show more compassion?"},
+    {"prompt": "What does it mean to be kind to yourself?"}
+]
+
+with open("data/scenarios/my_scenarios.json", "w") as f:
+    json.dump(scenarios, f, indent=2)
+```
+
+<Warning>
+  Ensure your scenarios directory exists before writing:
+  ```bash
+  mkdir -p data/scenarios
+  ```
+</Warning>
+
+## Datasets used in the paper
+
+The EigenBench paper evaluated models using these public datasets:
+
+<CardGroup cols={2}>
+  <Card title="AskReddit" icon="reddit" href="https://www.kaggle.com/datasets/rodmcn/askreddit-questions-and-answers">
+    Community questions from Reddit's AskReddit subreddit
+  </Card>
+  <Card title="OpenAssistant" icon="message-bot" href="https://huggingface.co/datasets/OpenAssistant/oasst1">
+    Conversational assistant interactions
+  </Card>
+  <Card title="AIRiskDilemmas" icon="scale-balanced" href="https://huggingface.co/datasets/kellycyy/AIRiskDilemmas">
+    Ethical dilemmas from the LitmusValues dataset
+  </Card>
+</CardGroup>
+
+### Converting external datasets
+
+External datasets typically need conversion to EigenBench's scenario format:
+
+```python convert_dataset.py
+import json
+
+# Example: Converting a CSV to scenario format
+import csv
+
+scenarios = []
+with open("source_data.csv") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        scenarios.append({
+            "prompt": row["question"],
+            # Optional: preserve source metadata
+            "source_id": row["id"],
+        })
+
+with open("data/scenarios/converted.json", "w") as f:
+    json.dump(scenarios, f, indent=2)
+```
+
+## Response caching
+
+To avoid re-generating model responses across multiple experiments, use cached responses:
+
+```python
+"collection": {
+    "enabled": True,
+    "cached_responses_path": "data/responses/main_cache.jsonl",
+}
+```
+
+See the [Collection guide](/guides/collection#response-caching) for details on building and using response caches.
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Start small for testing" icon="flask">
+    When testing a new constitution or model set, use a small scenario count:
+
+    ```python
+    "dataset": {
+        "path": "data/scenarios/large_dataset.json",
+        "count": 10,  # Test with just 10 scenarios
+    }
+    ```
+
+    Once validated, scale up to your full dataset.
+  </Accordion>
+
+  <Accordion title="Use reproducible shuffling" icon="shuffle">
+    Always set `shuffle_seed` when shuffling to ensure reproducibility:
+
+    ```python
+    "shuffle": True,
+    "shuffle_seed": 42,  # Same shuffle every time
+    ```
+  </Accordion>
+
+  <Accordion title="Split large datasets" icon="scissors">
+    For very large datasets, split across multiple runs:
+
+    ```python
+    # Run chunks in parallel
+    # runs/chunk_0/spec.py
+    "start": 0,
+    "count": 1000,
+
+    # runs/chunk_1/spec.py
+    "start": 1000,
+    "count": 1000,
+    ```
+
+    Combine evaluation files afterward if needed.
+  </Accordion>
+
+  <Accordion title="Keep scenarios focused" icon="bullseye">
+    Each scenario should be relevant to your constitution's values. Irrelevant prompts add noise:
+
+    ✅ **Good for kindness constitution:**
+    - "How should I respond to someone who wronged me?"
+    - "What's the best way to help a struggling colleague?"
+
+    ❌ **Poor for kindness constitution:**
+    - "What's the square root of 144?"
+    - "How do I compile a C++ program?"
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Run spec" icon="file-code" href="/guides/run-spec">
+    Complete run specification reference
+  </Card>
+  <Card title="Collection" icon="database" href="/guides/collection">
+    Configure evaluation collection
+  </Card>
+</CardGroup>

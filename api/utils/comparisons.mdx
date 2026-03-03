@@ -1,0 +1,171 @@
+---
+title: Comparisons
+description: Extract and handle comparison data from criteria-based evaluation runs
+---
+
+The comparisons module provides utilities for extracting pairwise comparison data from judge evaluations and handling inconsistencies in the comparison results.
+
+## extract_comparisons_with_ties_criteria
+
+Extract comparison rows from evaluation data with support for multiple criteria and tie handling.
+
+```python
+comparisons, data_cleaned = extract_comparisons_with_ties_criteria(
+    data,
+    num_criteria=5,
+    verbose=True,
+    return_name_map=False
+)
+```
+
+### Parameters
+
+<ParamField path="data" type="list[dict]" required>
+  List of evaluation records. Each record must contain:
+  - `judge response`: Judge's evaluation response with criterion tags
+  - `eval1 response`: First evaluator's response
+  - `eval2 response`: Second evaluator's response
+  - `eval1 reflection`: First evaluator's reflection
+  - `eval2 reflection`: Second evaluator's reflection
+  - `scenario_index`: Index of the evaluation scenario
+  - `judge`: Judge model index
+  - `eval1`: First evaluator model index
+  - `eval2`: Second evaluator model index
+</ParamField>
+
+<ParamField path="num_criteria" type="int" required>
+  Number of criteria to extract. Used as a hard cap - any criterion tags above this value are ignored. Must be positive.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="False">
+  If True, prints detailed statistics about the extraction process including error counts, missing tags, and distribution of criteria.
+</ParamField>
+
+<ParamField path="return_name_map" type="bool" default="False">
+  If True, returns a tuple with an additional model name mapping dictionary. The mapping contains the most common name for each model index.
+</ParamField>
+
+### Returns
+
+<ResponseField name="comparisons" type="list[list]">
+  List of comparison rows. Each row contains:
+  - `[0]`: Criterion index (0-based)
+  - `[1]`: Scenario index
+  - `[2]`: Judge model index
+  - `[3]`: First evaluator model index
+  - `[4]`: Second evaluator model index
+  - `[5]`: Score (0=tie, 1=eval1 wins, 2=eval2 wins)
+</ResponseField>
+
+<ResponseField name="data_cleaned" type="list[dict]">
+  Subset of input data that successfully contributed at least one comparison.
+</ResponseField>
+
+<ResponseField name="model_name_map" type="dict[int, str]">
+  Only returned when `return_name_map=True`. Maps model indices to their most commonly used names across all evaluations.
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.utils.comparisons import extract_comparisons_with_ties_criteria
+
+# Sample evaluation data
+data = [
+    {
+        "judge response": "<criterion_1_choice>1</criterion_1_choice><criterion_2_choice>0</criterion_2_choice>",
+        "eval1 response": "Response A",
+        "eval2 response": "Response B",
+        "eval1 reflection": "Reflection A",
+        "eval2 reflection": "Reflection B",
+        "scenario_index": 0,
+        "judge": 0,
+        "eval1": 1,
+        "eval2": 2,
+        "judge_name": "judge-model",
+        "eval1_name": "model-a",
+        "eval2_name": "model-b"
+    }
+]
+
+# Extract comparisons with name mapping
+comparisons, cleaned, name_map = extract_comparisons_with_ties_criteria(
+    data,
+    num_criteria=2,
+    verbose=True,
+    return_name_map=True
+)
+
+print(f"Extracted {len(comparisons)} comparisons")
+print(f"Model names: {name_map}")
+# Output:
+# Extracted 2 comparisons
+# Model names: {0: 'judge-model', 1: 'model-a', 2: 'model-b'}
+```
+
+## handle_inconsistencies_with_ties_criteria
+
+Convert strict order-inconsistent transpose pairs into ties to maintain consistency.
+
+```python
+comparisons_consistent = handle_inconsistencies_with_ties_criteria(comparisons)
+```
+
+When judge evaluations contain inconsistent comparisons (e.g., A > B in one comparison but B > A in the transpose), this function resolves the inconsistency by converting both to ties.
+
+### Parameters
+
+<ParamField path="comparisons" type="list[list]" required>
+  List of comparison rows from `extract_comparisons_with_ties_criteria`. Each row must contain:
+  - `[0]`: Criterion index
+  - `[1]`: Scenario index
+  - `[2]`: Judge model index
+  - `[3]`: First evaluator model index
+  - `[4]`: Second evaluator model index
+  - `[5]`: Score (0=tie, 1=eval1 wins, 2=eval2 wins)
+</ParamField>
+
+### Returns
+
+<ResponseField name="comparisons_new" type="list[list]">
+  List of comparison rows with inconsistencies resolved. Has the same structure as the input, but transpose pairs with conflicting scores are converted to ties (score=0).
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.utils.comparisons import (
+    extract_comparisons_with_ties_criteria,
+    handle_inconsistencies_with_ties_criteria
+)
+
+# Extract raw comparisons
+comparisons, _ = extract_comparisons_with_ties_criteria(data, num_criteria=3)
+
+# Resolve inconsistencies
+comparisons_clean = handle_inconsistencies_with_ties_criteria(comparisons)
+
+print(f"Original: {len(comparisons)} comparisons")
+print(f"After consistency check: {len(comparisons_clean)} comparisons")
+
+# The function ensures that if comparison (A, B) = 1 (A wins)
+# and comparison (B, A) = 1 (B wins, inconsistent with transpose),
+# both are converted to score 0 (tie)
+```
+
+## Criterion tag format
+
+The judge response should contain XML-style tags for each criterion:
+
+```xml
+<criterion_1_choice>1</criterion_1_choice>
+<criterion_2_choice>0</criterion_2_choice>
+<criterion_3_choice>2</criterion_3_choice>
+```
+
+Valid scores:
+- `0`: Tie between eval1 and eval2
+- `1`: eval1 wins
+- `2`: eval2 wins
+
+Any other values or malformed tags will be skipped during extraction.

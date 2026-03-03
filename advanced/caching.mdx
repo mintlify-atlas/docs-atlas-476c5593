@@ -1,0 +1,386 @@
+---
+title: Response caching
+description: Guide to using response caching in EigenBench to reduce API costs and speed up experiments
+---
+
+Response caching allows you to store and reuse model responses across multiple evaluation runs. This dramatically reduces API costs and speeds up experimentation when evaluating the same models on the same scenarios.
+
+## How caching works
+
+EigenBench's caching system separates response generation from evaluation collection:
+
+<Steps>
+  <Step title="Cache collection">
+    All models generate responses to all scenarios once. Responses are stored in a JSONL file.
+  </Step>
+  <Step title="Evaluation collection">
+    During evaluation, cached responses are reused instead of making new API calls. Only judge calls are made.
+  </Step>
+  <Step title="Multiple experiments">
+    You can run different sampling strategies, constitutions, or judges using the same cached responses.
+  </Step>
+</Steps>
+
+<Info>
+  Caching is especially valuable when experimenting with different sampling strategies or constitutions on the same dataset.
+</Info>
+
+## Enabling caching
+
+### Step 1: Configure cache path
+
+Add `cached_responses_path` to your run spec:
+
+```python
+RUN_SPEC = {
+    "name": "my_experiment",
+    "collection": {
+        "cached_responses_path": "data/responses/main_cache.jsonl",
+        # ... other collection settings
+    },
+}
+```
+
+### Step 2: Run cache collection
+
+The pipeline automatically runs cache collection first when `cached_responses_path` is set:
+
+```bash
+python scripts/run.py runs/my_experiment/spec.py
+```
+
+**Pipeline stages:**
+1. **Cache collection** (if configured)
+2. **Evaluation collection** (uses cached responses)
+3. **Training** (if enabled)
+
+See run.py:25-33 for implementation.
+
+<Note>
+  If `cached_responses_path` is `None`, cache collection is skipped entirely (run.py:33).
+</Note>
+
+## Cache file format
+
+Cache files are JSONL (JSON Lines) where each line is a scenario's responses:
+
+```json
+{"scenario": "...", "scenario_index": 0, "responses": {"Model A": "...", "Model B": "..."}}
+{"scenario": "...", "scenario_index": 1, "responses": {"Model A": "...", "Model B": "..."}}
+```
+
+**Structure:**
+- `scenario`: The prompt text
+- `scenario_index`: Index in the dataset
+- `responses`: Dict mapping model nicknames to response strings
+
+See flows.py:56-62 for how cache entries are created.
+
+## Cache lookup
+
+During evaluation collection, EigenBench checks the cache before making API calls:
+
+```python
+# From pipeline/eval/criteria_collectors.py:68
+def _resolve_cached_response(
+    scenario_index: int,
+    model_nick: str,
+    cached_responses_by_scenario: dict | None = None,
+):
+    if not cached_responses_by_scenario:
+        return None
+    entry = cached_responses_by_scenario.get(scenario_index)
+    if not entry:
+        return None
+    responses = entry.get("responses", {})
+    return responses.get(model_nick)
+```
+
+**Cache hit:** Response is reused (criteria_collectors.py:115-118)  
+**Cache miss:** New API call is made (criteria_collectors.py:121-135)
+
+<Info>
+  When verbose mode is enabled, you'll see `"Using cached response for eval {i}: {model_nick}"` for cache hits.
+</Info>
+
+## Cache management
+
+### Overwriting existing cache
+
+By default, cached scenarios are skipped. To rebuild the cache:
+
+```python
+RUN_SPEC = {
+    "collection": {
+        "cached_responses_path": "data/responses/main_cache.jsonl",
+        "overwrite_cached_responses": True,  # Force re-generation
+    },
+}
+```
+
+See run_collect_responses.py:51-72 for overwrite logic.
+
+<Warning>
+  `overwrite_cached_responses: True` will make API calls even for scenarios that already exist in the cache. This increases costs.
+</Warning>
+
+### Incremental caching
+
+By default, caching is incremental:
+
+```python
+# From scripts/run_collect_responses.py:69
+if (not overwrite) and (scenario_index in cached_index):
+    if verbose:
+        print(f"Skipping scenario_index={scenario_index}; cached response set already exists.")
+    continue
+```
+
+This allows you to:
+1. Run on first 100 scenarios
+2. Later extend to 200 scenarios
+3. Only scenarios 100-199 will be cached
+
+### Cache indexing
+
+Caches are indexed by `scenario_index` for fast lookup:
+
+```python
+# From scripts/run_collect_responses.py:13
+def _build_cached_index(cached_records):
+    index = {}
+    for entry in cached_records:
+        if isinstance(entry, dict) and "scenario_index" in entry and "responses" in entry:
+            index[entry["scenario_index"]] = entry
+    return index
+```
+
+This ensures O(1) cache lookups during evaluation (see run_collect.py:84-86).
+
+## Usage patterns
+
+### Pattern 1: Cache once, evaluate many times
+
+Generate responses once, then experiment with different sampling strategies:
+
+```python
+# Cache creation run
+RUN_SPEC_CACHE = {
+    "name": "cache_creation",
+    "models": {"GPT-4": "openai/gpt-4", "Claude": "anthropic/claude-3"},
+    "dataset": {"path": "data/scenarios/reddit.json", "count": 1000},
+    "collection": {
+        "cached_responses_path": "data/responses/reddit_cache.jsonl",
+        "enabled": True,
+    },
+    "training": {"enabled": False},  # Skip training
+}
+
+# Evaluation run 1: random sampling
+RUN_SPEC_EVAL_1 = {
+    "collection": {
+        "cached_responses_path": "data/responses/reddit_cache.jsonl",
+        "sampler_mode": "random_judge_group",
+        "groups": 1,
+    },
+}
+
+# Evaluation run 2: adaptive sampling
+RUN_SPEC_EVAL_2 = {
+    "collection": {
+        "cached_responses_path": "data/responses/reddit_cache.jsonl",
+        "sampler_mode": "adaptive_inverse_count",
+        "groups": 3,
+    },
+}
+```
+
+### Pattern 2: Multiple constitutions, same responses
+
+Evaluate with different criteria without re-generating responses:
+
+```python
+# Kindness evaluation
+RUN_SPEC_KINDNESS = {
+    "collection": {
+        "cached_responses_path": "data/responses/shared_cache.jsonl",
+    },
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,
+    },
+}
+
+# Claude constitution evaluation
+RUN_SPEC_CLAUDE = {
+    "collection": {
+        "cached_responses_path": "data/responses/shared_cache.jsonl",
+    },
+    "constitution": {
+        "path": "data/constitutions/claude.json",
+        "num_criteria": 39,
+    },
+}
+```
+
+### Pattern 3: Cache-only mode
+
+Generate cache without running evaluations or training:
+
+```python
+RUN_SPEC = {
+    "name": "cache_only",
+    "collection": {
+        "cached_responses_path": "data/responses/cache.jsonl",
+        "enabled": False,  # Skip evaluation collection
+    },
+    "training": {
+        "enabled": False,  # Skip training
+    },
+}
+```
+
+<Note>
+  The cache collection stage runs before `collection.enabled` is checked, so the cache is still built (see run.py:25-33).
+</Note>
+
+## Cost savings example
+
+Assume:
+- 4 models
+- 1000 scenarios
+- $0.01 per API call
+
+**Without caching:**
+- Evaluee responses: 4 models × 1000 scenarios = 4,000 calls
+- Judge reflections: 4 judges × 4 evaluees × 1000 scenarios = 16,000 calls
+- Judge comparisons: 4 judges × 12 pairs × 1000 scenarios = 48,000 calls
+- **Total: 68,000 calls = $680**
+
+**With caching (3 experiment iterations):**
+- Cache creation: 4,000 calls = $40
+- Evaluation 1: 64,000 calls (judges only) = $640
+- Evaluation 2: 64,000 calls (judges only) = $640
+- Evaluation 3: 64,000 calls (judges only) = $640
+- **Total: 196,000 calls = $1,960**
+
+**Without caching (3 iterations): 204,000 calls = $2,040**
+
+**Savings:** $80 (4% reduction) - savings increase with more iterations.
+
+## Debugging cache issues
+
+### Cache not being used
+
+<AccordionGroup>
+  <Accordion title="Check path configuration">
+    Ensure `cached_responses_path` is set correctly:
+
+    ```python
+    "collection": {
+        "cached_responses_path": "data/responses/cache.jsonl",  # Must exist
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Verify model nicknames match">
+    Cache keys are model nicknames, which must match exactly:
+
+    ```python
+    # Cache file has: "GPT-4": "..."
+    # Spec must use: "GPT-4" (not "GPT 4" or "gpt-4")
+    "models": {
+        "GPT-4": "openai/gpt-4",
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Check scenario indices">
+    Cache lookup uses `scenario_index`, which depends on dataset selection:
+
+    ```python
+    # If cache was created with start=0, count=100
+    # But evaluation uses start=100, count=100
+    # Cache misses will occur (different scenario_index values)
+    ```
+
+    Keep `start`, `count`, `shuffle`, and `shuffle_seed` consistent.
+  </Accordion>
+
+  <Accordion title="Enable verbose mode">
+    See cache hits/misses in real-time:
+
+    ```python
+    RUN_SPEC = {
+        "verbose": True,
+    }
+    ```
+
+    Look for: `"Using cached response for eval {i}: {model_nick}"`
+  </Accordion>
+</AccordionGroup>
+
+### Cache file corrupted
+
+If the cache file is invalid JSONL:
+
+```bash
+# Validate each line is valid JSON
+python -c "import json; [json.loads(l) for l in open('data/responses/cache.jsonl')]"
+```
+
+If validation fails, delete and rebuild:
+
+```bash
+rm data/responses/cache.jsonl
+python scripts/run.py runs/my_experiment/spec.py
+```
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Use descriptive names" icon="tag">
+    Name caches after the dataset/models:
+    
+    ```
+    reddit_gpt4_claude.jsonl
+    coding_questions_all_models.jsonl
+    ```
+  </Card>
+
+  <Card title="Version control exclusion" icon="git-alt">
+    Add cache files to `.gitignore`:
+    
+    ```
+    data/responses/*.jsonl
+    ```
+  </Card>
+
+  <Card title="Organize by project" icon="folder">
+    Use subdirectories for large projects:
+    
+    ```
+    data/responses/project_a/cache.jsonl
+    data/responses/project_b/cache.jsonl
+    ```
+  </Card>
+
+  <Card title="Document cache creation" icon="file-alt">
+    Include spec reference in filename or docs:
+    
+    ```
+    cache_from_spec_v1.jsonl
+    ```
+  </Card>
+</CardGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Sampling strategies" icon="shuffle" href="/advanced/sampling-strategies">
+    Experiment with different samplers using cached responses
+  </Card>
+  <Card title="Custom constitutions" icon="scale-balanced" href="/advanced/custom-constitutions">
+    Evaluate cached responses against multiple constitutions
+  </Card>
+</CardGroup>

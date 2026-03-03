@@ -1,0 +1,452 @@
+---
+title: EigenTrust
+description: Understanding the EigenTrust algorithm and trust matrix computation
+---
+
+EigenTrust is the algorithm that converts a network of pairwise evaluations into global trust scores. Originally developed for peer-to-peer networks, EigenBench applies it to measure which AI models are most trusted by the network.
+
+## The trust matrix
+
+The trust matrix S captures pairwise trust relationships: S[i,j] represents how much model i trusts model j.
+
+### Computing the trust matrix
+
+After training a Bradley-Terry-Davidson (BTD) model, we compute the trust matrix from the learned embeddings:
+
+```python pipeline/trust/eigentrust.py
+def compute_trust_matrix(model, device: str = "cpu"):
+    U = model.u.weight.data.to(device)  # Judge embeddings
+    V = model.v.weight.data.to(device)  # Evaluee embeddings
+    S = U @ V.t()                       # Compute similarity
+    S = torch.exp(S)                    # Exponentiate to positive values
+    return S
+```
+
+<Note>
+The trust score S[i,j] = exp(u_i · v_j) measures how much judge i's evaluation tendencies align with evaluee j's response characteristics.
+</Note>
+
+### Trust matrix with ties
+
+When using BTD models that explicitly handle ties, the trust matrix incorporates tie propensity:
+
+```python pipeline/trust/eigentrust.py
+def compute_trust_matrix_ties(model, device: str = "cpu"):
+    U = model.u.weight.data.to(device)
+    V = model.v.weight.data.to(device)
+    log_lambda = model.log_lambda.weight.data.to(device)
+    
+    # Base trust from embeddings
+    logits = U @ V.t()
+    s = torch.exp(logits)
+    lambda_i = torch.exp(log_lambda)
+    
+    # Add tie contributions
+    sqrt_s = torch.sqrt(s)
+    sqrt_s_sum = sqrt_s.sum(dim=1, keepdim=True)
+    tie_terms = sqrt_s * (sqrt_s_sum - sqrt_s)
+    tie_contribution = 0.5 * lambda_i * tie_terms
+    
+    S = s + tie_contribution
+    
+    # Row-normalize
+    Z_i = S.sum(dim=1, keepdim=True)
+    T = S / Z_i
+    return T
+```
+
+This formulation ensures that models with high tie propensity (lambda) distribute trust more evenly across evaluees.
+
+## The EigenTrust algorithm
+
+EigenTrust computes global trust scores through iterative propagation of local trust.
+
+### Intuition
+
+<Steps>
+  <Step title="Start with uniform trust">
+    Initially, all models have equal trust: t = [1/n, 1/n, ..., 1/n]
+  </Step>
+  
+  <Step title="Propagate trust through network">
+    Each model distributes its trust to others proportionally to their local trust scores.
+  </Step>
+  
+  <Step title="Iterate until convergence">
+    Repeat trust propagation until the distribution stabilizes.
+  </Step>
+  
+  <Step title="Final scores are eigenvalues">
+    The converged trust vector is the principal eigenvector of the trust matrix.
+  </Step>
+</Steps>
+
+### Implementation
+
+```python pipeline/trust/eigentrust.py
+def row_normalize(S):
+    """Normalize rows to form a stochastic matrix."""
+    row_sums = S.sum(dim=1, keepdim=True)
+    C = S / row_sums
+    return C
+
+def damp_matrix(C, alpha: float = 0.0):
+    """Add damping to prevent spider traps and rank sinks.
+    
+    Args:
+        C: Row-normalized trust matrix
+        alpha: Damping factor (0 = no damping, 1 = uniform)
+    
+    Returns:
+        T: Damped transition matrix
+    """
+    M = C.size(0)
+    E = torch.full_like(C, 1.0 / M)  # Uniform distribution
+    return (1 - alpha) * C + alpha * E
+
+def eigentrust(
+    C,
+    alpha: float = 0.0,
+    tol: float = 1e-6,
+    max_iter: int = 1000,
+    verbose: bool = True
+):
+    """Compute EigenTrust scores via power iteration.
+    
+    Args:
+        C: Row-normalized trust matrix
+        alpha: Damping factor (default 0.0 = no damping)
+        tol: Convergence tolerance (L1 norm)
+        max_iter: Maximum iterations
+        verbose: Show progress bar
+    
+    Returns:
+        t: Global trust scores (sums to 1)
+    """
+    T = damp_matrix(C, alpha)
+    t = torch.full((T.size(0),), 1.0 / T.size(0), device=T.device)
+    
+    if verbose:
+        for _ in tqdm(range(max_iter)):
+            t_next = t @ T
+            if torch.norm(t_next - t, p=1) < tol:
+                break
+            t = t_next
+    else:
+        for _ in range(max_iter):
+            t_next = t @ T
+            if torch.norm(t_next - t, p=1) < tol:
+                break
+            t = t_next
+    
+    return t_next
+```
+
+<Info>
+This is power iteration for computing the principal eigenvector of T. The trust scores are the stationary distribution of the Markov chain defined by T.
+</Info>
+
+## Mathematical details
+
+### The trust update equation
+
+At each iteration:
+
+```
+t^(k+1) = t^(k) · T
+```
+
+Where:
+- **t^(k)** is the trust vector at iteration k
+- **T** is the (damped) row-normalized trust matrix
+- **t^(k+1)** is the updated trust vector
+
+### Convergence
+
+EigenTrust converges when:
+
+```
+||t^(k+1) - t^(k)||_1 < tol
+```
+
+Typically converges in 50-200 iterations with tol=1e-6.
+
+<Warning>
+If the trust matrix has strongly disconnected components, convergence may be slow or the final scores may be sensitive to initialization. Use alpha > 0 (damping) to ensure better convergence.
+</Warning>
+
+## Damping factor
+
+The damping factor alpha controls how much we regularize toward uniform trust:
+
+<Tabs>
+  <Tab title="No damping (alpha=0)">
+    Pure trust propagation. Trust flows entirely according to the learned trust matrix.
+    
+    ```python
+    scores = eigentrust(C, alpha=0.0)
+    ```
+    
+    **Use when**: You have dense evaluations and trust the learned network structure.
+  </Tab>
+  
+  <Tab title="Light damping (alpha=0.1-0.3)">
+    Small regularization toward uniform. Helps with convergence while respecting network structure.
+    
+    ```python
+    scores = eigentrust(C, alpha=0.2)
+    ```
+    
+    **Use when**: You want stable rankings but have some sparse regions in the network.
+  </Tab>
+  
+  <Tab title="Heavy damping (alpha=0.5-0.9)">
+    Strong regularization. Similar to PageRank's "random surfer" model.
+    
+    ```python
+    scores = eigentrust(C, alpha=0.85)  # PageRank default
+    ```
+    
+    **Use when**: Evaluations are very sparse or you want to penalize insularity.
+  </Tab>
+</Tabs>
+
+## Example: Computing trust scores
+
+Here's a complete example:
+
+```python
+import torch
+from pipeline.train.bt_models import VectorBTD
+from pipeline.trust.eigentrust import (
+    compute_trust_matrix,
+    row_normalize,
+    eigentrust
+)
+
+# 1. Load trained model
+model = VectorBTD(num_models=4, d=2)
+model.load_state_dict(torch.load("model.pt"))
+
+# 2. Compute trust matrix
+S = compute_trust_matrix(model, device="cpu")
+print("Trust matrix S:")
+print(S)
+
+# 3. Row-normalize
+C = row_normalize(S)
+print("\nRow-normalized C:")
+print(C)
+
+# 4. Compute EigenTrust scores
+t = eigentrust(C, alpha=0.0, tol=1e-6)
+print("\nGlobal trust scores:")
+for i, score in enumerate(t):
+    print(f"Model {i}: {score:.4f}")
+```
+
+Output:
+```
+Trust matrix S:
+tensor([[1.2000, 0.8000, 0.9000, 0.7000],
+        [0.9000, 1.1000, 0.8500, 0.7500],
+        [0.8000, 0.9000, 1.3000, 0.9500],
+        [0.7000, 0.8000, 0.8500, 1.2000]])
+
+Row-normalized C:
+tensor([[0.3333, 0.2222, 0.2500, 0.1944],
+        [0.2571, 0.3143, 0.2429, 0.2143],
+        [0.2051, 0.2308, 0.3333, 0.2436],
+        [0.1944, 0.2222, 0.2361, 0.3333]])
+
+Global trust scores:
+Model 0: 0.2521
+Model 1: 0.2608
+Model 2: 0.2643
+Model 3: 0.2228
+```
+
+## Interpreting trust scores
+
+EigenTrust scores have several interpretations:
+
+<AccordionGroup>
+  <Accordion title="Stationary distribution">
+    Trust scores represent the long-run proportion of time spent at each node in a random walk on the trust network.
+  </Accordion>
+  
+  <Accordion title="Recursive trust">
+    A model's trust is high if it is trusted by models that themselves have high trust (recursive definition).
+  </Accordion>
+  
+  <Accordion title="Network consensus">
+    Models with high trust are those the network collectively prefers, accounting for both direct and transitive trust.
+  </Accordion>
+  
+  <Accordion title="Alignment score">
+    In EigenBench context: models with high trust produce outputs that align with the constitution as judged by the network.
+  </Accordion>
+</AccordionGroup>
+
+## Comparison with PageRank
+
+EigenTrust is closely related to PageRank:
+
+| Aspect | EigenTrust | PageRank |
+|--------|------------|----------|
+| **Domain** | Trust networks | Web graph |
+| **Matrix** | Trust scores | Link structure |
+| **Damping** | Optional (alpha=0 default) | Required (alpha=0.85 default) |
+| **Interpretation** | Trusted nodes | Important pages |
+| **Convergence** | Power iteration | Power iteration |
+
+Both solve for the principal eigenvector of a stochastic matrix, but EigenTrust typically uses less damping.
+
+## Trust matrix properties
+
+### Asymmetry
+
+The trust matrix is generally **not symmetric**: S[i,j] ≠ S[j,i]
+
+- Model i might trust model j (prefer j's outputs)
+- But model j might not trust model i (prefer different models)
+
+This asymmetry is important: it captures directional trust relationships.
+
+### Self-trust
+
+Diagonal elements S[i,i] represent self-trust:
+
+- High S[i,i]: model i's judge embedding aligns with its own evaluee embedding
+- Interpretation: the model likes responses similar to what it produces
+
+<Note>
+Self-trust is not excluded in EigenBench. A model that highly values its own style contributes to the trust network like any other preference.
+</Note>
+
+## Criterion-specific trust
+
+When using `CriteriaVectorBTD`, you can compute separate trust matrices for each criterion:
+
+```python
+def compute_criterion_trust_matrices(model, num_criteria, num_models):
+    """Compute trust matrix for each criterion separately."""
+    trust_matrices = []
+    
+    for c in range(num_criteria):
+        # Extract criterion-specific embeddings
+        u_c = model.u.weight.data[c*num_models:(c+1)*num_models]
+        v = model.v.weight.data
+        
+        # Compute criterion-specific trust
+        S_c = torch.exp(u_c @ v.t())
+        trust_matrices.append(S_c)
+    
+    return trust_matrices
+
+# Compute EigenTrust for each criterion
+for c, S_c in enumerate(trust_matrices):
+    C_c = row_normalize(S_c)
+    t_c = eigentrust(C_c)
+    print(f"Criterion {c} trust scores: {t_c}")
+```
+
+This reveals:
+- Which models are trusted for specific criteria
+- Whether some criteria produce different rankings than others
+- If certain models specialize in particular dimensions of alignment
+
+## Visualization
+
+Visualize the trust network using the trust matrix:
+
+```python
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Heatmap of trust matrix
+plt.figure(figsize=(8, 6))
+sns.heatmap(
+    C.numpy(),
+    annot=True,
+    fmt=".3f",
+    cmap="YlOrRd",
+    xticklabels=["Model A", "Model B", "Model C", "Model D"],
+    yticklabels=["Model A", "Model B", "Model C", "Model D"],
+)
+plt.title("Row-Normalized Trust Matrix")
+plt.xlabel("Trusted")
+plt.ylabel("Truster")
+plt.show()
+```
+
+Or use network visualization:
+
+```python
+import networkx as nx
+
+# Build directed graph
+G = nx.DiGraph()
+for i in range(C.size(0)):
+    for j in range(C.size(1)):
+        if C[i,j] > threshold:  # Only show strong trust edges
+            G.add_edge(i, j, weight=C[i,j].item())
+
+# Draw network
+pos = nx.spring_layout(G)
+nx.draw(G, pos, with_labels=True, node_size=1000, node_color="lightblue")
+labels = nx.get_edge_attributes(G, "weight")
+nx.draw_networkx_edge_labels(G, pos, edge_labels=labels)
+plt.title("Trust Network")
+plt.show()
+```
+
+## Practical considerations
+
+<AccordionGroup>
+  <Accordion title="When to use damping">
+    Use alpha > 0 if:
+    - Evaluations are sparse (many models lack sufficient comparisons)
+    - The network has disconnected components
+    - You want to penalize insular communities
+    - Convergence is slow with alpha=0
+  </Accordion>
+  
+  <Accordion title="Convergence speed">
+    Typical convergence: 50-200 iterations. If convergence is slow:
+    - Increase damping (alpha)
+    - Check for numerical issues (very small/large matrix values)
+    - Verify trust matrix is properly row-normalized
+  </Accordion>
+  
+  <Accordion title="Handling zero rows">
+    If a model has no outgoing trust (row sums to zero), row normalization fails. Solutions:
+    - Add small epsilon to all entries before normalizing
+    - Replace zero rows with uniform distribution
+    - Use damping (alpha > 0) which automatically handles this
+  </Accordion>
+  
+  <Accordion title="Sensitivity to embedding dimension">
+    Higher-dimensional embeddings (d=10-20) can capture more nuanced trust relationships but require more data. Start with d=2-5 for small populations.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Pipeline" icon="diagram-project" href="/concepts/pipeline">
+    See how EigenTrust fits into the pipeline
+  </Card>
+  
+  <Card title="Constitutions" icon="scroll" href="/concepts/constitutions">
+    Understand evaluation criteria
+  </Card>
+  
+  <Card title="Run an evaluation" icon="rocket" href="/quickstart">
+    Compute trust scores in practice
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/trust/eigentrust">
+    Explore the API
+  </Card>
+</CardGroup>

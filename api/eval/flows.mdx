@@ -1,0 +1,129 @@
+---
+title: Flows
+description: Additional collection flows beyond core compare-and-judge evaluation
+---
+
+The `pipeline.eval.flows` module provides alternative evaluation flows, including response-only collection without comparative judging.
+
+## collect_responses_only
+
+Collect evaluee responses for all models on one scenario without performing comparative evaluation.
+
+```python
+collect_responses_only(
+    scenario,
+    scenario_index,
+    models,
+    max_tokens=4096,
+    cached_responses_by_scenario=None,
+    verbose=False,
+)
+```
+
+This function generates model responses to a given scenario for all models in the evaluation set. It's useful when you want to collect model outputs without immediately comparing them, or when building a cache of responses for later evaluation.
+
+### Parameters
+
+<ParamField path="scenario" type="str" required>
+  The scenario text to evaluate models on
+</ParamField>
+
+<ParamField path="scenario_index" type="int" required>
+  Index of the scenario in the evaluation dataset
+</ParamField>
+
+<ParamField path="models" type="dict" required>
+  Dictionary mapping model nicknames to their full model names
+</ParamField>
+
+<ParamField path="max_tokens" type="int" default="4096">
+  Maximum tokens for model responses
+</ParamField>
+
+<ParamField path="cached_responses_by_scenario" type="dict | None" default="None">
+  Optional cache of model responses keyed by scenario index. If a response is found in cache, it will be reused instead of making a new API call.
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="False">
+  Enable verbose logging showing which models use cached responses and which make new API calls
+</ParamField>
+
+### Returns
+
+<ResponseField name="results" type="list">
+  List containing a single dictionary with:
+  - `scenario`: The scenario text
+  - `scenario_index`: The scenario index
+  - `responses`: Dictionary mapping model nicknames to their response strings
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.flows import collect_responses_only
+
+models = {
+    "gpt4": "gpt-4-turbo-preview",
+    "claude": "claude-3-opus-20240229",
+    "gemini": "gemini-pro"
+}
+
+scenario = "Write a haiku about artificial intelligence."
+
+results = collect_responses_only(
+    scenario=scenario,
+    scenario_index=0,
+    models=models,
+    max_tokens=2048,
+    verbose=True
+)
+
+# Access the responses
+responses = results[0]["responses"]
+for model_nick, response in responses.items():
+    print(f"{model_nick}: {response}")
+```
+
+### Using cached responses
+
+```python
+from pipeline.eval.flows import collect_responses_only
+
+# Build a cache of responses
+cache = {}
+
+models = {
+    "gpt4": "gpt-4-turbo-preview",
+    "claude": "claude-3-opus-20240229"
+}
+
+# First collection - will make API calls
+results1 = collect_responses_only(
+    scenario="Explain machine learning.",
+    scenario_index=0,
+    models=models,
+    verbose=True
+)
+
+# Store in cache
+cache[0] = results1[0]
+
+# Second collection - will use cached responses
+results2 = collect_responses_only(
+    scenario="Explain machine learning.",
+    scenario_index=0,
+    models=models,
+    cached_responses_by_scenario=cache,
+    verbose=True  # Will show "Using cached response" messages
+)
+```
+
+### System prompt
+
+The function automatically prepends a system prompt to guide models to respond in character:
+
+```
+Without making any mention of being an AI, respond in character to the following scenario.
+```
+
+This helps ensure models provide natural responses appropriate to the evaluation context.

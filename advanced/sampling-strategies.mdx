@@ -1,0 +1,223 @@
+---
+title: Sampling strategies
+description: Deep dive into EigenBench's sampling strategies for judge and evaluee selection
+---
+
+EigenBench provides three sampling strategies to control how judges and evaluees are selected during evaluation collection. The choice of strategy affects coverage, computational cost, and how well under-sampled models get evaluated.
+
+## Overview
+
+Sampling strategies determine:
+- Which model acts as the judge for a given scenario
+- Which subset of models are evaluated (evaluees)
+- How well the evaluation dataset covers all model pairs
+
+<Info>
+  **Practical defaults**: Use `random_judge_group` with `group_size: 4` for most runs.
+</Info>
+
+## Available strategies
+
+<Tabs>
+  <Tab title="random_judge_group">
+    ### Random judge group (recommended)
+
+    The default and recommended strategy for most experiments.
+
+    **How it works:**
+    1. Randomly shuffle all models
+    2. Form groups of `group_size` models
+    3. Select the first group as evaluees
+    4. Select a random model (from all models) as judge
+
+    **Implementation:**
+    ```python
+    # From pipeline/eval/samplers.py:40
+    def sampler_random_judge_group(num_models: int, group_size: int, **kwargs):
+        """Random judge + one random group of evaluees."""
+        
+        group = random_groups(num_models, group_size)[0]
+        judge_idx = random.randint(0, num_models - 1)
+        return int(judge_idx), list(group)
+    ```
+
+    **When to use:**
+    - Default choice for most experiments
+    - When you want consistent group-based sampling
+    - When computational cost is a concern
+
+    **Configuration:**
+    ```python
+    "collection": {
+        "sampler_mode": "random_judge_group",
+        "group_size": 4,
+        "groups": 1,
+    }
+    ```
+
+    <Note>
+      The last group is padded if there aren't enough models to fill it completely (see `random_groups` in samplers.py:25).
+    </Note>
+  </Tab>
+
+  <Tab title="adaptive_inverse_count">
+    ### Adaptive inverse count
+
+    Balances sampling toward under-evaluated judges and evaluees using inverse-count weighting.
+
+    **How it works:**
+    1. Track how many times each model has been used as judge and evaluee
+    2. Compute inverse-count weights: `weight = 1.0 / (1.0 + count)^alpha`
+    3. Sample judge and evaluees with probability proportional to weights
+
+    **Implementation:**
+    ```python
+    # From pipeline/eval/samplers.py:56
+    def sampler_adaptive_inverse_count(
+        num_models: int, 
+        group_size: int, 
+        judge_counts, 
+        eval_counts, 
+        alpha: float = 2.0, 
+        **kwargs
+    ):
+        """Inverse-count weighted sampling for judge and evaluees."""
+        
+        judge_arr = np.array(judge_counts, dtype=float)
+        j_weights = 1.0 / (1.0 + judge_arr) ** alpha
+        j_probs = j_weights / j_weights.sum()
+        judge_idx = int(np.random.choice(num_models, p=j_probs))
+        
+        eval_arr = np.array(eval_counts, dtype=float)
+        e_weights = 1.0 / (1.0 + eval_arr) ** alpha
+        e_probs = e_weights / e_weights.sum()
+        eval_idxs = np.random.choice(
+            num_models, 
+            size=group_size, 
+            replace=False, 
+            p=e_probs
+        ).tolist()
+        
+        return judge_idx, eval_idxs
+    ```
+
+    **When to use:**
+    - When you need balanced coverage across all models
+    - When some models are consistently under-sampled
+    - When evaluation budget allows for adaptive rebalancing
+
+    **Alpha parameter:**
+    The `alpha` parameter controls how aggressively under-sampled models are prioritized:
+
+    - `alpha = 0.0`: Equivalent to uniform sampling
+    - `alpha = 1.0-2.0`: Practical range for most runs (default: 2.0)
+    - Higher alpha: More aggressive balancing toward under-sampled models
+
+    **Configuration:**
+    ```python
+    "collection": {
+        "sampler_mode": "adaptive_inverse_count",
+        "group_size": 4,
+        "groups": 2,  # More groups recommended for adaptive sampling
+        "alpha": 2.0,
+    }
+    ```
+
+    <Warning>
+      Adaptive sampling requires tracking counts across rounds, which adds slight computational overhead (see collect.py:70-92).
+    </Warning>
+  </Tab>
+
+  <Tab title="uniform">
+    ### Uniform
+
+    Pure random sampling without grouping - baseline strategy.
+
+    **How it works:**
+    1. Randomly select one model as judge (uniform probability)
+    2. Randomly select `group_size` models as evaluees (uniform probability)
+
+    **Implementation:**
+    ```python
+    # From pipeline/eval/samplers.py:48
+    def sampler_uniform(num_models: int, group_size: int, **kwargs):
+        """Uniform random judge and uniform random evaluee subset."""
+        
+        judge_idx = random.randint(0, num_models - 1)
+        eval_idxs = random.sample(list(range(num_models)), k=group_size)
+        return int(judge_idx), list(eval_idxs)
+    ```
+
+    **When to use:**
+    - As a baseline for comparison
+    - When you want completely independent sampling per round
+    - For ablation studies
+
+    **Configuration:**
+    ```python
+    "collection": {
+        "sampler_mode": "uniform",
+        "group_size": 4,
+        "groups": 1,
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Coverage guidance
+
+To improve coverage of model pairs in your evaluation dataset:
+
+<Steps>
+  <Step title="Increase groups first">
+    Increase the `groups` parameter (e.g., 2-3) before increasing `group_size`.
+
+    ```python
+    "collection": {
+        "groups": 3,  # Run 3 separate judge+group batches per scenario
+    }
+    ```
+
+    See collect.py:64 for implementation.
+  </Step>
+
+  <Step title="Then adjust group size">
+    If coverage is still insufficient, increase `group_size`.
+
+    ```python
+    "collection": {
+        "group_size": 6,  # Evaluate 6 models per group
+    }
+    ```
+
+    <Note>
+      `group_size` is automatically capped at `num_models` (see collect.py:60-63).
+    </Note>
+  </Step>
+
+  <Step title="Consider adaptive sampling">
+    For the best coverage, switch to `adaptive_inverse_count` with higher `groups`.
+
+    ```python
+    "collection": {
+        "sampler_mode": "adaptive_inverse_count",
+        "groups": 3,
+        "alpha": 2.0,
+    }
+    ```
+  </Step>
+</Steps>
+
+## Comparison table
+
+| Strategy | Computational cost | Coverage quality | Use case |
+|----------|-------------------|------------------|----------|
+| `random_judge_group` | Low | Good | Default choice |
+| `adaptive_inverse_count` | Medium | Excellent | Balanced coverage needed |
+| `uniform` | Low | Fair | Baseline/ablations |
+
+## Code reference
+
+All sampling strategies are implemented in `pipeline/eval/samplers.py` and selected via `select_sampler()` (samplers.py:72).
+
+The collection orchestration in `pipeline/eval/collect.py:25` shows how samplers are invoked during evaluation collection.

@@ -1,0 +1,475 @@
+---
+title: Training configuration
+description: Guide to configuring Bradley-Terry and Bradley-Terry-Davidson model training
+---
+
+The **training** stage fits Bradley-Terry (BT) or Bradley-Terry-Davidson (BTD) models to the collected evaluations, learning latent representations of model quality and judge preferences. The training process produces alignment scores via EigenTrust.
+
+## Basic configuration
+
+Minimal training configuration:
+
+```python
+"training": {
+    "enabled": True,
+}
+```
+
+With automatic defaults:
+- BTD model with ties support
+- 2-dimensional embeddings
+- Learning rate 1e-3
+- Maximum 1000 epochs
+- 20% test split
+- Outputs to `runs/<run_name>/btd_d2/`
+
+## Configuration reference
+
+<ParamField path="enabled" type="boolean" default="true">
+  Whether to run the training stage. Set to `False` for collection-only mode.
+
+  ```python
+  "enabled": True
+  ```
+</ParamField>
+
+<ParamField path="model" type="string" default="btd_ties">
+  Model architecture to use.
+
+  Options:
+  - `btd_ties` - Bradley-Terry-Davidson with tie support (recommended)
+  - `bt` - Standard Bradley-Terry (binary comparisons only)
+
+  ```python
+  "model": "btd_ties"
+  ```
+</ParamField>
+
+<ParamField path="dims" type="list[int]" default="[2]">
+  List of embedding dimensions to train. Creates one output folder per dimension.
+
+  ```python
+  "dims": [2, 4, 8]  # Train 3 models with different dimensions
+  ```
+</ParamField>
+
+<ParamField path="lr" type="float" default="0.001">
+  Learning rate for Adam optimizer.
+
+  ```python
+  "lr": 1e-3
+  ```
+</ParamField>
+
+<ParamField path="weight_decay" type="float" default="0.0">
+  L2 regularization strength.
+
+  ```python
+  "weight_decay": 0.0  # No regularization
+  ```
+</ParamField>
+
+<ParamField path="max_epochs" type="integer" default="1000">
+  Maximum training epochs. Training may stop early if loss converges.
+
+  ```python
+  "max_epochs": 1000
+  ```
+</ParamField>
+
+<ParamField path="batch_size" type="integer" default="32">
+  Batch size for training.
+
+  ```python
+  "batch_size": 32
+  ```
+</ParamField>
+
+<ParamField path="device" type="string" default="cpu">
+  PyTorch device for training.
+
+  ```python
+  "device": "cpu"      # CPU
+  "device": "cuda"     # GPU
+  "device": "cuda:0"   # Specific GPU
+  ```
+</ParamField>
+
+<ParamField path="test_size" type="float" default="0.2">
+  Fraction of comparisons reserved for test set (0.0 to 1.0).
+
+  ```python
+  "test_size": 0.2  # 20% test, 80% train
+  ```
+</ParamField>
+
+<ParamField path="group_split" type="boolean" default="false">
+  Whether to use grouped train/test splitting to reduce data leakage.
+
+  ```python
+  "group_split": False  # Random row split
+  "group_split": True   # Keep (scenario, judge, evaluee-pair) groups intact
+  ```
+</ParamField>
+
+<ParamField path="separate_criteria" type="boolean" default="false">
+  Whether to learn separate embeddings per criterion.
+
+  ```python
+  "separate_criteria": False  # Aggregate across criteria (recommended)
+  "separate_criteria": True   # Per-criterion embeddings
+  ```
+</ParamField>
+
+<ParamField path="output_dir" type="string" default="runs/<run_name>/">
+  Base directory for training outputs. Dimension-specific folders (`btd_d2/`, `btd_d4/`) are created inside.
+
+  ```python
+  "output_dir": "custom/outputs"
+  ```
+</ParamField>
+
+## Model architectures
+
+### Bradley-Terry-Davidson (BTD) with ties
+
+**Model:** `btd_ties` (recommended)
+
+Supports three-way outcomes: prefer A, prefer B, or tie.
+
+```python
+"training": {
+    "model": "btd_ties",
+}
+```
+
+**Architecture:**
+- Judge embeddings: `u[c, i]` (criterion-conditioned)
+- Evaluee embeddings: `v[j]`
+- Tie parameters: `log_lambda[c, i]`
+
+**Use when:**
+- Your collection has `allow_ties: True`
+- You want to model genuine equivalence between responses
+- You're using the recommended collection settings
+
+<Note>
+  BTD is the model used in the EigenBench paper and is recommended for most experiments.
+</Note>
+
+### Bradley-Terry (BT)
+
+**Model:** `bt`
+
+Binary comparisons only (prefer A vs prefer B).
+
+```python
+"training": {
+    "model": "bt",
+}
+```
+
+**Architecture:**
+- Judge embeddings: `u[i]`
+- Evaluee embeddings: `v[j]`
+
+**Use when:**
+- You forced binary choices with `allow_ties: False`
+- You want to compare against a simpler baseline
+
+<Warning>
+  If your collection data contains ties but you train with `model: "bt"`, ties will be discarded or converted to binary outcomes.
+</Warning>
+
+## Embedding dimensions
+
+The `dims` parameter controls the dimensionality of learned embeddings:
+
+```python
+"dims": [2, 4, 8]
+```
+
+This trains three separate models with 2D, 4D, and 8D embeddings, creating output folders:
+- `runs/my_run/btd_d2/`
+- `runs/my_run/btd_d4/`
+- `runs/my_run/btd_d8/`
+
+### Choosing dimensions
+
+**2D (recommended for most cases):**
+- Easy to visualize
+- Sufficient for capturing primary quality dimensions
+- Faster to train
+
+**Higher dimensions (4-8):**
+- Can model more complex preference structures
+- Useful when you have many models or criteria
+- Risk of overfitting with limited data
+
+<Accordion title="When to use higher dimensions" icon="up-right-and-down-left-from-center">
+  Consider higher dimensions when:
+  - You have 10+ models in your ensemble
+  - You're using many criteria (8+)
+  - You have rich evaluation data (1000+ scenarios, multiple groups)
+  - You observe underfitting in 2D (high train/test loss)
+
+  Signs you should stick with lower dimensions:
+  - Large gap between train and test loss (overfitting)
+  - Similar EigenTrust rankings across dimensions
+  - Limited evaluation data
+</Accordion>
+
+## Train/test splitting
+
+### Random split (default)
+
+```python
+"group_split": False,
+"test_size": 0.2,
+```
+
+Randomly partitions comparison rows into 80% train / 20% test.
+
+**Pros:** Simple, standard approach
+**Cons:** May have data leakage (same judge/evaluee pairs in train and test)
+
+### Grouped split (recommended for rigorous evaluation)
+
+```python
+"group_split": True,
+"test_size": 0.2,
+```
+
+Keeps entire groups of comparisons together, where a group is defined by:
+- Criterion
+- Scenario
+- Judge model
+- Unordered evaluee pair
+
+**Pros:** Reduces data leakage, more honest test metrics
+**Cons:** Slightly more complex splitting logic
+
+<Note>
+  For publication-quality experiments, use `group_split: True` to ensure test set properly measures generalization.
+</Note>
+
+## Optimization settings
+
+### Learning rate
+
+```python
+"lr": 1e-3,  # Default, works well for most cases
+```
+
+Typical values:
+- `1e-4` - Conservative, slower convergence
+- `1e-3` - Recommended default
+- `1e-2` - Aggressive, risk of instability
+
+### Early stopping
+
+Training automatically stops if loss converges:
+
+```python
+"max_epochs": 1000,
+```
+
+Convergence detection:
+- Monitors last 10 epochs
+- Stops if average loss change < 0.0001
+
+Typically converges in 100-500 epochs for well-specified models.
+
+### Regularization
+
+```python
+"weight_decay": 0.0,  # No regularization (default)
+"weight_decay": 1e-4, # Light L2 regularization
+```
+
+Consider adding weight decay if:
+- Test loss is much higher than train loss (overfitting)
+- You have limited evaluation data
+- You're using high embedding dimensions
+
+## Per-criterion vs aggregated
+
+By default, EigenBench aggregates judgments across all criteria:
+
+```python
+"separate_criteria": False,  # Recommended
+```
+
+This learns:
+- One set of evaluee embeddings `v[j]`
+- Criterion-conditioned judge embeddings `u[c, i]`
+
+**Alternative: Separate per-criterion models**
+
+```python
+"separate_criteria": True,
+```
+
+Learns completely independent embeddings per criterion.
+
+<Warning>
+  `separate_criteria: True` requires significantly more data and is rarely needed. Use the default aggregated approach unless you have specific research questions about criterion-specific preferences.
+</Warning>
+
+## Example configurations
+
+<CodeGroup>
+```python Minimal (defaults)
+"training": {
+    "enabled": True,
+}
+```
+
+```python Standard experiment
+"training": {
+    "enabled": True,
+    "model": "btd_ties",
+    "dims": [2],
+    "lr": 1e-3,
+    "max_epochs": 1000,
+    "batch_size": 32,
+    "test_size": 0.2,
+    "group_split": True,
+}
+```
+
+```python Multi-dimensional
+"training": {
+    "enabled": True,
+    "model": "btd_ties",
+    "dims": [2, 4, 8],  # Compare dimensions
+    "lr": 1e-3,
+    "max_epochs": 1000,
+}
+```
+
+```python GPU training
+"training": {
+    "enabled": True,
+    "model": "btd_ties",
+    "dims": [2],
+    "device": "cuda",
+    "batch_size": 128,  # Larger batches on GPU
+}
+```
+
+```python Conservative (small dataset)
+"training": {
+    "enabled": True,
+    "model": "btd_ties",
+    "dims": [2],
+    "lr": 5e-4,
+    "weight_decay": 1e-4,
+    "max_epochs": 500,
+    "group_split": True,
+}
+```
+</CodeGroup>
+
+## Monitoring training
+
+With `verbose: True`, monitor training progress:
+
+```python
+"verbose": True,
+```
+
+```bash
+Epoch   1, Loss = 0.8234
+Epoch   2, Loss = 0.7156
+Epoch   3, Loss = 0.6523
+...
+Epoch  87, Loss = 0.1234
+loss converged, breaking
+Loss plot saved to runs/my_run/btd_d2/training_loss.png
+Model saved to runs/my_run/btd_d2/model.pt
+```
+
+## Training outputs
+
+Each dimension creates a folder with:
+
+```
+runs/my_run/
+└── btd_d2/
+    ├── training_loss.png       # Loss curve
+    ├── model.pt                # Trained model weights
+    ├── eigentrust.txt          # EigenTrust scores
+    ├── uv_embeddings_pca.png   # 2D PCA visualization
+    ├── eigenbench.png          # EigenBench ranking plot
+    └── log_train.txt           # Training metadata
+```
+
+See the [Outputs guide](/guides/outputs) for details on interpreting these files.
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Start with defaults" icon="rocket">
+    The default settings work well for most experiments:
+
+    ```python
+    "training": {
+        "enabled": True,
+    }
+    ```
+
+    Only customize when you have specific needs.
+  </Accordion>
+
+  <Accordion title="Use BTD with ties" icon="handshake">
+    Unless you have a specific reason to use binary BT:
+
+    ```python
+    "model": "btd_ties",
+    ```
+
+    This matches the paper methodology and handles ties naturally.
+  </Accordion>
+
+  <Accordion title="Start with 2D embeddings" icon="chart-scatter">
+    Begin with 2D to keep models interpretable:
+
+    ```python
+    "dims": [2],
+    ```
+
+    Only explore higher dimensions if you observe underfitting.
+  </Accordion>
+
+  <Accordion title="Use group split for publications" icon="graduation-cap">
+    For rigorous evaluation metrics:
+
+    ```python
+    "group_split": True,
+    ```
+
+    This ensures test set truly measures generalization.
+  </Accordion>
+
+  <Accordion title="Compare multiple dimensions" icon="sliders">
+    When exploring model capacity:
+
+    ```python
+    "dims": [2, 4, 8],
+    ```
+
+    Compare EigenTrust rankings across dimensions to verify robustness.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Outputs" icon="file-chart-line" href="/guides/outputs">
+    Understand training outputs and visualizations
+  </Card>
+  <Card title="Run spec" icon="file-code" href="/guides/run-spec">
+    Complete run specification reference
+  </Card>
+</CardGroup>

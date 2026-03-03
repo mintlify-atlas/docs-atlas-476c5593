@@ -1,80 +1,387 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Run your first EigenBench value alignment experiment in minutes
 ---
 
-## Get started in three steps
+## Overview
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through running a complete EigenBench experiment: from setting up your run configuration to analyzing consensus alignment scores.
 
-### Step 1: Set up your local environment
+<Note>
+  Make sure you've completed the [installation](/installation) steps before proceeding.
+</Note>
+
+## Create a run folder
+
+Each experiment in EigenBench has its own "run folder" containing configuration and outputs:
+
+```bash
+mkdir -p runs/my_run
+```
+
+## Copy the example spec
+
+EigenBench uses a Python-based configuration file called a "run spec":
+
+```bash
+cp runs/example/spec.py runs/my_run/spec.py
+```
+
+## Configure your experiment
+
+Open `runs/my_run/spec.py` and customize the configuration:
+
+```python spec.py
+RUN_SPEC = {
+    "verbose": False,
+    
+    # Define your model ensemble
+    "models": {
+        "Claude 4 Sonnet": "anthropic/claude-sonnet-4",
+        "GPT 4.1": "openai/gpt-4.1",
+        "Gemini 2.5 Pro": "google/gemini-2.5-pro",
+        "Grok 4": "x-ai/grok-4",
+    },
+    
+    # Configure scenario dataset
+    "dataset": {
+        "path": "data/scenarios/reddit_questions.json",
+        "start": 0,
+        "count": 1000,
+        "shuffle": False,
+        "shuffle_seed": 42,
+    },
+    
+    # Define value system
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,
+    },
+    
+    # Collection settings
+    "collection": {
+        "enabled": True,
+        "cached_responses_path": None,
+        "allow_ties": True,
+        "group_size": 4,
+        "groups": 1,
+        "sampler_mode": "random_judge_group",
+        "alpha": 2.0,
+    },
+    
+    # Training settings
+    "training": {
+        "enabled": True,
+        "model": "btd_ties",
+        "dims": [2],
+        "lr": 1e-3,
+        "weight_decay": 0.0,
+        "max_epochs": 1000,
+        "batch_size": 32,
+        "device": "cpu",
+        "test_size": 0.2,
+        "group_split": False,
+        "separate_criteria": False,
+    },
+}
+```
+
+### Key configuration options
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+  <Accordion title="models">
+    Dictionary mapping display names to OpenRouter model IDs. These models will both generate responses and judge each other.
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+    ```python
+    "models": {
+        "Claude 4 Sonnet": "anthropic/claude-sonnet-4",
+        "GPT 4.1": "openai/gpt-4.1",
+    }
+    ```
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+  
+  <Accordion title="dataset.path">
+    Path to a JSON file containing scenarios. Each scenario should elicit value-relevant responses from models.
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+    ```python
+    "dataset": {
+        "path": "data/scenarios/reddit_questions.json",
+        "count": 100,  # Use first 100 scenarios
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="constitution">
+    Defines the value system for evaluation. The constitution file is a JSON array of criteria.
+    
+    ```python
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,  # Must match number in file
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="collection.sampler_mode">
+    Controls how judge-evaluee pairs are sampled:
+    - `random_judge_group`: Random sampling (recommended default)
+    - `adaptive_inverse_count`: Balances under-sampled judges/evaluees
+    - `uniform`: Baseline uniform sampling
+    
+    ```python
+    "collection": {
+        "sampler_mode": "random_judge_group",
+        "group_size": 4,  # Number of models compared per judgment
+        "groups": 1,      # Number of judge groups per scenario
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="training.model">
+    Type of Bradley-Terry model to fit:
+    - `btd_ties`: Bradley-Terry-Davison with tie support (recommended)
+    - `bt`: Standard Bradley-Terry without ties
+    
+    ```python
+    "training": {
+        "model": "btd_ties",
+        "dims": [2],  # Embedding dimensions to train
+    }
+    ```
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## Run the experiment
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+Execute the full pipeline with a single command:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```bash
+python scripts/run.py runs/my_run/spec.py
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+### Pipeline stages
 
-### Step 3: Go live
+The script will execute three stages:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<Steps>
+  <Step title="Collect responses cache (optional)">
+    If `cached_responses_path` is set, pre-generates model responses for reuse
+  </Step>
+  <Step title="Collect evaluations">
+    Models judge each other's responses according to constitutional criteria
+  </Step>
+  <Step title="Train and compute EigenTrust">
+    Fits BTD model and aggregates trust scores into consensus alignment
+  </Step>
+</Steps>
+
+<Info>
+  The collection stage may take significant time depending on your model ensemble size, scenario count, and API rate limits. Progress bars will show real-time status.
+</Info>
+
+## Understand the outputs
+
+After running, your `runs/my_run/` folder will contain:
+
+```text
+runs/my_run/
+├── spec.py                 # Your configuration
+├── evaluations.jsonl       # Collected judgments
+└── btd_d2/                 # Training outputs for d=2
+    ├── model.pt            # Trained BTD model weights
+    ├── eigentrust.txt      # Consensus alignment scores
+    ├── training_loss.png   # Loss curve over epochs
+    ├── uv_embeddings_pca.png  # PCA visualization of embeddings
+    ├── eigenbench.png      # Final alignment scores plot
+    └── log_train.txt       # Training logs
+```
+
+### View alignment scores
+
+The consensus alignment scores are in `btd_d2/eigentrust.txt`:
+
+```text eigentrust.txt
+Claude 4 Sonnet: 0.3245
+GPT 4.1: 0.2891
+Gemini 2.5 Pro: 0.2156
+Grok 4: 0.1708
+```
+
+Higher scores indicate stronger alignment with the constitution's value system.
+
+### Visualizations
+
+EigenBench automatically generates several plots:
+
+<CardGroup cols={2}>
+  <Card title="training_loss.png" icon="chart-line">
+    Training and validation loss curves showing model convergence
+  </Card>
+  <Card title="uv_embeddings_pca.png" icon="diagram-project">
+    PCA projection of judge (u) and evaluee (v) embeddings
+  </Card>
+  <Card title="eigenbench.png" icon="ranking-star">
+    Bar chart of final EigenTrust consensus scores
+  </Card>
+</CardGroup>
+
+## Advanced usage
+
+### Run specific stages only
+
+You can disable stages to run only what you need:
+
+<CodeGroup>
+```python Train only (with existing evaluations)
+"collection": {
+    "enabled": False,
+    "evaluations_path": "runs/my_run/evaluations.jsonl",
+},
+"training": {
+    "enabled": True,
+}
+```
+
+```python Collect only (no training)
+"collection": {
+    "enabled": True,
+},
+"training": {
+    "enabled": False,
+}
+```
+
+```python Cache responses only
+"collection": {
+    "enabled": False,
+    "cached_responses_path": "data/responses/main_cache.jsonl",
+},
+"training": {
+    "enabled": False,
+}
+```
+</CodeGroup>
+
+### Use response caching
+
+Cache model responses for efficient reuse across experiments:
+
+```python spec.py
+"collection": {
+    "enabled": True,
+    "cached_responses_path": "data/responses/main_cache.jsonl",
+    # ... other settings
+}
+```
+
+On first run, responses are cached. Subsequent runs with the same models and scenarios will reuse the cache, saving API calls.
+
+### Train multiple dimensions
+
+Explore different embedding dimensions:
+
+```python spec.py
+"training": {
+    "dims": [2, 4, 8],  # Train d=2, d=4, and d=8 models
+    # ... other settings
+}
+```
+
+This creates separate output folders: `btd_d2/`, `btd_d4/`, `btd_d8/`.
+
+### Enable verbose logging
+
+For detailed diagnostics:
+
+```python spec.py
+RUN_SPEC = {
+    "verbose": True,
+    # ... rest of config
+}
+```
+
+## Example experiment
+
+Here's a minimal working example comparing three models on kindness:
+
+```python runs/kindness_test/spec.py
+RUN_SPEC = {
+    "verbose": False,
+    "models": {
+        "Claude": "anthropic/claude-sonnet-4",
+        "GPT-4": "openai/gpt-4.1",
+        "Gemini": "google/gemini-2.5-pro",
+    },
+    "dataset": {
+        "path": "data/scenarios/reddit_questions.json",
+        "count": 50,  # Small dataset for quick test
+    },
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,
+    },
+    "collection": {
+        "enabled": True,
+        "group_size": 3,  # All models in each group
+        "groups": 1,
+    },
+    "training": {
+        "enabled": True,
+        "model": "btd_ties",
+        "dims": [2],
+        "max_epochs": 500,
+        "device": "cpu",
+    },
+}
+```
+
+Run it:
+
+```bash
+python scripts/run.py runs/kindness_test/spec.py
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Run spec reference" icon="book" href="/guides/run-spec">
+    Complete documentation of all configuration options
+  </Card>
+  <Card title="Constitutions" icon="scale-balanced" href="/concepts/constitutions">
+    Learn how to create custom value systems
+  </Card>
+  <Card title="Datasets" icon="database" href="/guides/datasets">
+    Prepare scenario datasets for evaluation
+  </Card>
+  <Card title="Interpreting results" icon="chart-bar" href="/guides/outputs">
+    Deep dive into output analysis and visualization
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="API rate limit errors">
+    OpenRouter enforces rate limits. If you hit limits:
+    - Reduce `dataset.count` to use fewer scenarios
+    - Reduce `collection.groups` to sample fewer judgments
+    - Enable caching with `cached_responses_path` to avoid re-generating responses
+  </Accordion>
+  
+  <Accordion title="Training divergence">
+    If training loss doesn't decrease:
+    - Lower the learning rate: `"lr": 1e-4`
+    - Increase `max_epochs` to allow more convergence time
+    - Check that you have enough evaluation data (increase scenarios or groups)
+  </Accordion>
+  
+  <Accordion title="Out of memory during training">
+    Reduce memory usage:
+    ```python
+    "training": {
+        "batch_size": 16,  # Smaller batches
+        "device": "cpu",   # Use CPU if GPU OOM
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,177 @@
+---
+title: Transcripts
+description: Read and write transcript records in JSON and JSONL formats
+---
+
+The transcripts module provides utilities for loading, saving, and appending records to transcript files. It supports both JSONL (for streaming/append-heavy workloads) and JSON array formats.
+
+## load_records
+
+Load records from a JSON or JSONL file.
+
+```python
+records = load_records("data/transcripts.jsonl")
+```
+
+### Parameters
+
+<ParamField path="path" type="str | Path" required>
+  Path to the file to read. Supports both JSON (`.json`) and JSONL (`.jsonl`) formats. The format is automatically detected based on the file extension.
+</ParamField>
+
+### Returns
+
+<ResponseField name="records" type="list[dict]">
+  List of records loaded from the file. Returns an empty list if the file doesn't exist.
+</ResponseField>
+
+### Behavior
+
+- If the file doesn't exist, returns an empty list (no error)
+- For `.jsonl` files: reads line-by-line, skipping empty lines
+- For `.json` files: reads the entire file and expects a JSON array
+- Raises `ValueError` if a JSON file contains non-list data
+
+### Example
+
+```python
+from pipeline.utils.transcripts import load_records
+from pathlib import Path
+
+# Load from JSONL file
+records = load_records("eval_results.jsonl")
+print(f"Loaded {len(records)} records")
+
+# Load from JSON file
+records = load_records(Path("eval_results.json"))
+
+# Handle non-existent files gracefully
+records = load_records("missing.jsonl")
+print(records)  # Output: []
+```
+
+## save_records
+
+Save records to a JSON or JSONL file, overwriting any existing content.
+
+```python
+save_records("data/output.jsonl", records)
+```
+
+### Parameters
+
+<ParamField path="path" type="str | Path" required>
+  Path to the file to write. The format is determined by the file extension:
+  - `.jsonl`: Writes one JSON object per line
+  - Other extensions: Writes a JSON array with indentation
+</ParamField>
+
+<ParamField path="records" type="Iterable[dict]" required>
+  Records to save. Can be any iterable of dictionaries (list, generator, etc.). The iterable will be converted to a list internally.
+</ParamField>
+
+### Behavior
+
+- Automatically creates parent directories if they don't exist
+- Overwrites the file if it already exists
+- For JSONL: writes each record as a single line with ASCII encoding
+- For JSON: writes with 4-space indentation for readability
+
+### Example
+
+```python
+from pipeline.utils.transcripts import save_records
+
+records = [
+    {"id": 1, "text": "First evaluation", "score": 0.95},
+    {"id": 2, "text": "Second evaluation", "score": 0.87}
+]
+
+# Save as JSONL (one record per line)
+save_records("results/eval.jsonl", records)
+
+# Save as formatted JSON array
+save_records("results/eval.json", records)
+
+# Parent directories are created automatically
+save_records("data/experiments/run_1/output.jsonl", records)
+```
+
+## append_records
+
+Append new records to an existing file without rewriting existing content.
+
+```python
+append_records("data/transcripts.jsonl", new_records)
+```
+
+### Parameters
+
+<ParamField path="path" type="str | Path" required>
+  Path to the file to append to. The format is determined by the file extension:
+  - `.jsonl`: Efficiently appends lines to the end of the file
+  - Other extensions: Loads the entire file, appends records, and rewrites
+</ParamField>
+
+<ParamField path="new_records" type="Iterable[dict]" required>
+  Records to append. Can be any iterable of dictionaries. If empty, the file is not modified.
+</ParamField>
+
+### Behavior
+
+- Automatically creates parent directories if they don't exist
+- For JSONL files: performs efficient append operation (no need to read existing content)
+- For JSON files: reads existing content, extends the list, and saves the full array
+- If `new_records` is empty, returns early without modifying the file
+
+### Example
+
+```python
+from pipeline.utils.transcripts import append_records, load_records
+
+# Efficient append for JSONL (doesn't load existing records)
+new_data = [
+    {"id": 3, "text": "Third evaluation", "score": 0.92}
+]
+append_records("results/eval.jsonl", new_data)
+
+# For JSON files, existing content is loaded and merged
+append_records("results/eval.json", new_data)
+
+# Verify the append
+all_records = load_records("results/eval.jsonl")
+print(f"Total records: {len(all_records)}")
+
+# Empty list is a no-op
+append_records("results/eval.jsonl", [])
+```
+
+## Format comparison
+
+### JSONL format (recommended for streaming)
+
+```jsonl
+{"id": 1, "score": 0.95}
+{"id": 2, "score": 0.87}
+{"id": 3, "score": 0.92}
+```
+
+Advantages:
+- Efficient appending without reading the entire file
+- Ideal for long-running jobs that generate results incrementally
+- Memory-efficient for large datasets
+
+### JSON array format
+
+```json
+[
+    {"id": 1, "score": 0.95},
+    {"id": 2, "score": 0.87},
+    {"id": 3, "score": 0.92}
+]
+```
+
+Advantages:
+- More human-readable with indentation
+- Compatible with tools that expect JSON arrays
+- Easier to validate as a whole document

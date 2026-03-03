@@ -1,0 +1,209 @@
+---
+title: Datasets
+description: Load and process evaluation datasets from various sources
+---
+
+The `datasets` module provides utilities for loading scenario datasets from built-in sources or custom JSON files, with support for slicing, shuffling, and various input formats.
+
+## load_dataset_scenarios_from_spec
+
+Path-first dataset loader that supports multiple configuration formats.
+
+```python
+from pipeline.config.datasets import load_dataset_scenarios_from_spec
+
+scenarios = load_dataset_scenarios_from_spec(
+    {"path": "scenarios.json", "start": 0, "count": 100},
+    run_dir="/path/to/run"
+)
+```
+
+<ParamField path="dataset_cfg" type="dict | str" required>
+  Dataset configuration, either:
+  - Dictionary with `path` or `id` field
+  - String path to JSON file or dataset ID
+</ParamField>
+
+<ParamField path="run_dir" type="str | Path | None">
+  Optional run directory for resolving relative paths. Relative paths are resolved first against `run_dir`, then against the repository root.
+</ParamField>
+
+<ResponseField name="return" type="list[str]">
+  List of scenario strings loaded from the dataset
+</ResponseField>
+
+### Configuration formats
+
+**Dictionary with path:**
+```python
+{"path": "data/scenarios.json"}
+```
+
+**Dictionary with built-in dataset ID:**
+```python
+{"id": "reddit"}  # or "oasst", "airisk"
+```
+
+**String path:**
+```python
+"data/my_scenarios.json"
+```
+
+**String dataset ID:**
+```python
+"reddit"
+```
+
+### Accepted JSON formats
+
+**List of strings:**
+```json
+[
+  "What is the capital of France?",
+  "Explain quantum computing"
+]
+```
+
+**List of dictionaries with scenario field:**
+```json
+[
+  {"scenario": "What is the capital of France?", "metadata": {}},
+  {"prompt": "Explain quantum computing"},
+  {"question": "What is machine learning?"}
+]
+```
+
+The loader accepts dictionaries with `scenario`, `prompt`, or `question` string fields.
+
+### Examples
+
+```python
+# Load from custom file path
+scenarios = load_dataset_scenarios_from_spec(
+    "my_scenarios.json",
+    run_dir="/workspace/runs/my_run"
+)
+
+# Load from built-in dataset
+scenarios = load_dataset_scenarios_from_spec("reddit")
+
+# Load with dictionary config
+scenarios = load_dataset_scenarios_from_spec({
+    "path": "custom/scenarios.json"
+})
+```
+
+## load_dataset_scenarios
+
+Load scenarios from a built-in dataset by ID.
+
+```python
+from pipeline.config.datasets import load_dataset_scenarios
+
+scenarios = load_dataset_scenarios("reddit")
+```
+
+<ParamField path="dataset_id" type="str" required>
+  Built-in dataset identifier. Supported values:
+  - `"reddit"` - Reddit questions dataset
+  - `"oasst"` - OASST questions dataset
+  - `"airisk"` - AI risk dilemmas dataset
+</ParamField>
+
+<ResponseField name="return" type="list">
+  List of scenarios from the specified dataset
+</ResponseField>
+
+### Example
+
+```python
+# Load Reddit questions
+reddit_scenarios = load_dataset_scenarios("reddit")
+
+# Load OASST questions
+oasst_scenarios = load_dataset_scenarios("oasst")
+
+# Load AI risk dilemmas
+airisk_scenarios = load_dataset_scenarios("airisk")
+```
+
+## select_scenarios
+
+Select scenarios as `(original_index, scenario_text)` pairs with optional slicing and shuffling.
+
+```python
+from pipeline.config.datasets import select_scenarios
+
+selected = select_scenarios(
+    scenarios,
+    start=10,
+    count=50,
+    shuffle=True,
+    shuffle_seed=42
+)
+```
+
+<ParamField path="scenarios" type="list[str]" required>
+  Full list of scenario strings
+</ParamField>
+
+<ParamField path="start" type="int" default="0">
+  Starting index for slicing (must be >= 0)
+</ParamField>
+
+<ParamField path="count" type="int | None" default="None">
+  Number of scenarios to select. If `None`, selects all scenarios from `start` to the end.
+</ParamField>
+
+<ParamField path="shuffle" type="bool" default="False">
+  Whether to shuffle scenarios before slicing
+</ParamField>
+
+<ParamField path="shuffle_seed" type="int | None" default="None">
+  Random seed for reproducible shuffling. Only used when `shuffle=True`.
+</ParamField>
+
+<ResponseField name="return" type="list[tuple[int, str]]">
+  List of `(original_index, scenario_text)` tuples. Original indices are preserved so cache and evaluation keys remain stable.
+</ResponseField>
+
+### Behavior
+
+1. Builds indexed scenarios from the full input list
+2. Optionally shuffles before slicing (if `shuffle=True`)
+3. Applies `start` and `count` after optional shuffle
+4. Preserves original indices for stable caching
+
+### Examples
+
+```python
+scenarios = [
+    "Question 1",
+    "Question 2",
+    "Question 3",
+    "Question 4",
+    "Question 5"
+]
+
+# Select first 3 scenarios
+selected = select_scenarios(scenarios, count=3)
+# Returns: [(0, "Question 1"), (1, "Question 2"), (2, "Question 3")]
+
+# Skip first 2, select next 2
+selected = select_scenarios(scenarios, start=2, count=2)
+# Returns: [(2, "Question 3"), (3, "Question 4")]
+
+# Shuffle all scenarios with seed
+selected = select_scenarios(scenarios, shuffle=True, shuffle_seed=42)
+# Returns shuffled list with original indices preserved
+
+# Shuffle and select subset
+selected = select_scenarios(
+    scenarios,
+    start=1,
+    count=2,
+    shuffle=True,
+    shuffle_seed=42
+)
+# Returns 2 scenarios from shuffled list, starting at index 1
+```

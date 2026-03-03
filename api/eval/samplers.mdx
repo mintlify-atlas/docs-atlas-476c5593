@@ -1,0 +1,249 @@
+---
+title: Samplers
+description: Sampling policies for judge and evaluee selection in comparative evaluation
+---
+
+The `pipeline.eval.samplers` module provides different sampling strategies for selecting which models act as judges and which models are evaluated in each round.
+
+## Practical defaults
+
+- **Mode**: `random_judge_group`
+- **Group size**: `4`
+
+For better coverage, increase `groups` parameter in collection (e.g. 2-3) before increasing `group_size`.
+
+## sampler_random_judge_group
+
+Random judge plus one random group of evaluees. This is the recommended default sampler.
+
+```python
+sampler_random_judge_group(num_models, group_size, **kwargs)
+```
+
+### Parameters
+
+<ParamField path="num_models" type="int" required>
+  Total number of models in the evaluation
+</ParamField>
+
+<ParamField path="group_size" type="int" required>
+  Number of evaluees to include in the group
+</ParamField>
+
+### Returns
+
+<ResponseField name="judge_idx" type="int">
+  Index of the selected judge model
+</ResponseField>
+
+<ResponseField name="eval_idxs" type="list">
+  List of indices for the selected evaluee models
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.samplers import sampler_random_judge_group
+
+judge_idx, eval_idxs = sampler_random_judge_group(
+    num_models=6,
+    group_size=4
+)
+
+print(f"Judge: model {judge_idx}")
+print(f"Evaluees: models {eval_idxs}")
+# Output example:
+# Judge: model 2
+# Evaluees: models [0, 3, 5, 1]
+```
+
+## sampler_uniform
+
+Uniform random judge and uniform random evaluee subset. This is a baseline sampler.
+
+```python
+sampler_uniform(num_models, group_size, **kwargs)
+```
+
+### Parameters
+
+<ParamField path="num_models" type="int" required>
+  Total number of models in the evaluation
+</ParamField>
+
+<ParamField path="group_size" type="int" required>
+  Number of evaluees to select
+</ParamField>
+
+### Returns
+
+<ResponseField name="judge_idx" type="int">
+  Index of the selected judge model
+</ResponseField>
+
+<ResponseField name="eval_idxs" type="list">
+  List of indices for the selected evaluee models
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.samplers import sampler_uniform
+
+judge_idx, eval_idxs = sampler_uniform(
+    num_models=8,
+    group_size=3
+)
+```
+
+## sampler_adaptive_inverse_count
+
+Inverse-count weighted sampling for judge and evaluees. This sampler balances toward under-sampled judges and evaluees.
+
+```python
+sampler_adaptive_inverse_count(
+    num_models,
+    group_size,
+    judge_counts,
+    eval_counts,
+    alpha=2.0,
+    **kwargs
+)
+```
+
+### Parameters
+
+<ParamField path="num_models" type="int" required>
+  Total number of models in the evaluation
+</ParamField>
+
+<ParamField path="group_size" type="int" required>
+  Number of evaluees to select
+</ParamField>
+
+<ParamField path="judge_counts" type="list" required>
+  List of counts for how many times each model has served as judge
+</ParamField>
+
+<ParamField path="eval_counts" type="list" required>
+  List of counts for how many times each model has been evaluated
+</ParamField>
+
+<ParamField path="alpha" type="float" default="2.0">
+  Controls aggressiveness of inverse weighting. Higher values increase preference for under-sampled models:
+  - `alpha = 0`: Equivalent to uniform weighting
+  - `1.0-2.0`: Practical range for most runs
+</ParamField>
+
+### Returns
+
+<ResponseField name="judge_idx" type="int">
+  Index of the selected judge model
+</ResponseField>
+
+<ResponseField name="eval_idxs" type="list">
+  List of indices for the selected evaluee models
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.samplers import sampler_adaptive_inverse_count
+
+# Models 0 and 1 have been judges twice, others not at all
+judge_counts = [2, 2, 0, 0, 0, 0]
+
+# All models have been evaluated once
+eval_counts = [1, 1, 1, 1, 1, 1]
+
+judge_idx, eval_idxs = sampler_adaptive_inverse_count(
+    num_models=6,
+    group_size=4,
+    judge_counts=judge_counts,
+    eval_counts=eval_counts,
+    alpha=2.0
+)
+
+# More likely to select models 2-5 as judge (under-sampled)
+print(f"Selected judge: {judge_idx}")
+print(f"Selected evaluees: {eval_idxs}")
+```
+
+### When to use adaptive sampling
+
+Use `sampler_adaptive_inverse_count` when:
+- You want to ensure balanced coverage across all models
+- Some models are being under-represented as judges or evaluees
+- You're running multiple rounds and want to dynamically adjust sampling
+
+## select_sampler
+
+Helper function to get a sampler by mode string.
+
+```python
+select_sampler(mode)
+```
+
+### Parameters
+
+<ParamField path="mode" type="str" required>
+  Sampler mode name:
+  - `"random_judge_group"`: Returns `sampler_random_judge_group`
+  - `"adaptive_inverse_count"`: Returns `sampler_adaptive_inverse_count`
+  - `"uniform"`: Returns `sampler_uniform`
+</ParamField>
+
+### Returns
+
+<ResponseField name="sampler" type="callable">
+  The sampler function corresponding to the mode
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.samplers import select_sampler
+
+sampler = select_sampler("random_judge_group")
+
+judge_idx, eval_idxs = sampler(
+    num_models=5,
+    group_size=3
+)
+```
+
+## random_groups
+
+Utility function to partition all models into random groups of specified size.
+
+```python
+random_groups(total_models, group_size)
+```
+
+### Parameters
+
+<ParamField path="total_models" type="int" required>
+  Total number of models to partition
+</ParamField>
+
+<ParamField path="group_size" type="int" required>
+  Desired size for each group
+</ParamField>
+
+### Returns
+
+<ResponseField name="groups" type="list">
+  List of groups, where each group is a list of model indices. If the last group is smaller than group_size, it will be padded with random selections from earlier groups.
+</ResponseField>
+
+### Example
+
+```python
+from pipeline.eval.samplers import random_groups
+
+groups = random_groups(total_models=7, group_size=3)
+print(groups)
+# Output example:
+# [[4, 1, 6], [2, 0, 5], [3, 4, 1]]
+# Note: Last group padded with models 4 and 1 from earlier groups
+```

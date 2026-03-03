@@ -1,0 +1,142 @@
+---
+title: Constitutions
+description: Load evaluation criteria from constitution files
+---
+
+The `constitutions` module provides utilities for loading evaluation criteria from JSON constitution files, supporting multiple file formats and flexible path resolution.
+
+## get_criteria_from_spec
+
+Path-first criteria loader that extracts evaluation criteria from constitution files.
+
+```python
+from pipeline.config.constitutions import get_criteria_from_spec
+
+criteria = get_criteria_from_spec(
+    "constitution.json",
+    run_dir="/path/to/run"
+)
+```
+
+<ParamField path="constitution_cfg" type="dict | str" required>
+  Constitution configuration, either:
+  - Dictionary with `path` field
+  - String path to JSON constitution file
+</ParamField>
+
+<ParamField path="run_dir" type="str | Path | None">
+  Optional run directory for resolving relative paths. Relative paths are resolved first against `run_dir`, then against the repository root.
+</ParamField>
+
+<ResponseField name="return" type="list[str]">
+  List of criteria strings extracted from the constitution file
+</ResponseField>
+
+### Configuration formats
+
+**Dictionary with path:**
+```python
+{"path": "constitutions/my_constitution.json"}
+```
+
+**String path:**
+```python
+"constitutions/my_constitution.json"
+```
+
+### Accepted JSON formats
+
+**List of strings:**
+```json
+[
+  "Be helpful and harmless",
+  "Provide accurate information",
+  "Respect user privacy"
+]
+```
+
+**Dictionary with criteria field:**
+```json
+{
+  "criteria": [
+    "Be helpful and harmless",
+    "Provide accurate information",
+    "Respect user privacy"
+  ]
+}
+```
+
+**Dictionary with comparative_criteria field:**
+```json
+{
+  "comparative_criteria": [
+    "Response A is more helpful than B",
+    "Response A is more accurate than B"
+  ]
+}
+```
+
+**Dictionary with comparativeCriteria field (camelCase):**
+```json
+{
+  "comparativeCriteria": [
+    "Response A is more helpful than B",
+    "Response A is more accurate than B"
+  ]
+}
+```
+
+The loader supports three criteria field names: `criteria`, `comparative_criteria`, and `comparativeCriteria`.
+
+### Path resolution
+
+Relative paths are resolved in the following order:
+
+1. Against `run_dir` (if provided)
+2. Against repository root
+
+Absolute paths and paths with `~` (home directory) are supported.
+
+### Examples
+
+```python
+# Load from string path
+criteria = get_criteria_from_spec(
+    "constitution.json",
+    run_dir="/workspace/runs/my_run"
+)
+
+# Load from dictionary config
+criteria = get_criteria_from_spec({
+    "path": "constitutions/helpfulness.json"
+})
+
+# Load with absolute path
+criteria = get_criteria_from_spec(
+    "/absolute/path/to/constitution.json"
+)
+
+# Load with home directory expansion
+criteria = get_criteria_from_spec(
+    "~/my_constitutions/custom.json"
+)
+```
+
+### Error handling
+
+The function raises specific errors for common issues:
+
+- `FileNotFoundError`: Constitution file not found at any candidate path
+- `ValueError`: Invalid configuration format or JSON structure
+
+```python
+try:
+    criteria = get_criteria_from_spec("missing.json")
+except FileNotFoundError as e:
+    print(f"Constitution file not found: {e}")
+
+try:
+    criteria = get_criteria_from_spec({})  # Missing 'path'
+except ValueError as e:
+    print(f"Invalid config: {e}")
+```

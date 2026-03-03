@@ -1,0 +1,309 @@
+---
+title: Run specification
+description: Complete guide to configuring EigenBench experiments with run specs
+---
+
+A **run spec** is a Python dictionary that defines all aspects of an EigenBench experiment. It controls which models are evaluated, what data is used, how evaluations are collected, and how models are trained and ranked.
+
+## Creating a run spec
+
+<Steps>
+  <Step title="Create a run folder">
+    ```bash
+    mkdir -p runs/my_run
+    ```
+  </Step>
+
+  <Step title="Create a spec.py file">
+    Create `runs/my_run/spec.py` with a `RUN_SPEC` dictionary:
+
+    ```python runs/my_run/spec.py
+    RUN_SPEC = {
+        "verbose": False,
+        "models": {
+            "Claude 4 Sonnet": "anthropic/claude-sonnet-4",
+            "GPT 4.1": "openai/gpt-4.1",
+        },
+        "dataset": {
+            "path": "data/scenarios/reddit_questions.json",
+            "start": 0,
+            "count": 1000,
+        },
+        "constitution": {
+            "path": "data/constitutions/kindness.json",
+            "num_criteria": 8,
+        },
+        "collection": {
+            "enabled": True,
+        },
+        "training": {
+            "enabled": True,
+        },
+    }
+    ```
+  </Step>
+
+  <Step title="Run the pipeline">
+    ```bash
+    python scripts/run.py runs/my_run/spec.py
+    ```
+
+    You can also use the dotted module path:
+
+    ```bash
+    python scripts/run.py runs.my_run
+    ```
+  </Step>
+</Steps>
+
+## Top-level configuration
+
+### Verbose logging
+
+Control logging verbosity across all pipeline stages:
+
+```python
+"verbose": False  # Quieter logs (default)
+"verbose": True   # Detailed diagnostics
+```
+
+When enabled, you'll see detailed information about:
+- Scenario selection and slicing
+- Constitution criteria loading
+- Evaluation sampling decisions
+- Training progress and convergence
+- EigenTrust computation
+
+### Model configuration
+
+Define the models to evaluate as a dictionary mapping display names to OpenRouter model IDs:
+
+```python
+"models": {
+    "Claude 4 Sonnet": "anthropic/claude-sonnet-4",
+    "GPT 4.1": "openai/gpt-4.1",
+    "Gemini 2.5 Pro": "google/gemini-2.5-pro",
+    "Grok 4": "x-ai/grok-4",
+}
+```
+
+<Note>
+  Model names are used in output plots and logs. Choose descriptive names that will be readable in visualizations.
+</Note>
+
+<Warning>
+  All models must be available through [OpenRouter](https://openrouter.ai/). Set your `OPENROUTER_API_KEY` in `.env`.
+</Warning>
+
+## Run modes
+
+EigenBench supports different execution modes by toggling the `collection` and `training` sections.
+
+<AccordionGroup>
+  <Accordion title="Full pipeline" icon="play" defaultOpen>
+    Run the complete pipeline: response caching (optional), evaluation collection, and training.
+
+    ```python
+    "collection": {
+        "enabled": True,
+        "cached_responses_path": "data/responses/main_cache.jsonl",  # optional
+    },
+    "training": {
+        "enabled": True,
+    }
+    ```
+
+    **Behavior:**
+    1. If `cached_responses_path` is set, cache stage runs first
+    2. Evaluation collection runs
+    3. Training and EigenTrust computation runs
+  </Accordion>
+
+  <Accordion title="Collection only" icon="database">
+    Build evaluation transcripts without running model fitting. Useful for gathering data that will be analyzed later.
+
+    ```python
+    "collection": {
+        "enabled": True,
+    },
+    "training": {
+        "enabled": False,
+    }
+    ```
+
+    This produces `evaluations.jsonl` containing all pairwise judgments.
+  </Accordion>
+
+  <Accordion title="Training only" icon="chart-line">
+    Skip collection and train directly from existing evaluation transcripts.
+
+    ```python
+    "collection": {
+        "enabled": False,
+        "evaluations_path": "runs/my_run/evaluations.jsonl",
+    },
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,
+    },
+    "training": {
+        "enabled": True,
+    }
+    ```
+
+    <Note>
+      You still need to specify `constitution.num_criteria` for extraction even in training-only mode.
+    </Note>
+  </Accordion>
+
+  <Accordion title="Cache only" icon="hard-drive">
+    Precompute model responses for scenarios without running evaluations or training.
+
+    ```python
+    "collection": {
+        "enabled": False,
+        "cached_responses_path": "data/responses/main_cache.jsonl",
+    },
+    "training": {
+        "enabled": False,
+    }
+    ```
+
+    Useful for:
+    - Sharing response caches across multiple experiments
+    - Avoiding redundant API calls
+    - Preprocessing large scenario sets
+  </Accordion>
+</AccordionGroup>
+
+## Path resolution
+
+EigenBench automatically resolves paths relative to your run folder:
+
+<CodeGroup>
+```python Automatic paths (recommended)
+# No need to specify paths - they default to:
+# - evaluations_path: runs/my_run/evaluations.jsonl
+# - output_dir: runs/my_run/
+
+"collection": {
+    "enabled": True,
+},
+"training": {
+    "enabled": True,
+}
+```
+
+```python Custom paths
+"collection": {
+    "evaluations_path": "custom/location/evals.jsonl",
+},
+"training": {
+    "output_dir": "custom/outputs",
+}
+```
+</CodeGroup>
+
+### Path types
+
+- **Relative paths** in `dataset.path` and `constitution.path` resolve from repository root
+- **Relative paths** in `collection.evaluations_path` and `training.output_dir` resolve from run folder
+- **Absolute paths** are used as-is
+- **Tilde paths** (`~/...`) expand to home directory
+
+## Run name inference
+
+The run name is inferred from your spec location:
+
+| Spec location | Run name | Output folder |
+| --- | --- | --- |
+| `runs/my_run/spec.py` | `my_run` | `runs/my_run/` |
+| `runs/my_run/__init__.py` | `my_run` | `runs/my_run/` |
+| `runs/experiment.py` | `experiment` | `runs/experiment/` |
+
+You can override the inferred name:
+
+```python
+RUN_SPEC = {
+    "name": "custom_name",
+    # ... rest of config
+}
+```
+
+## Example configurations
+
+<CodeGroup>
+```python Minimal configuration
+RUN_SPEC = {
+    "models": {
+        "Model A": "provider/model-a",
+        "Model B": "provider/model-b",
+    },
+    "dataset": {
+        "path": "data/scenarios/my_scenarios.json",
+    },
+    "constitution": {
+        "path": "data/constitutions/my_values.json",
+        "num_criteria": 5,
+    },
+}
+```
+
+```python Production configuration
+RUN_SPEC = {
+    "verbose": True,
+    "models": {
+        "Claude 4 Sonnet": "anthropic/claude-sonnet-4",
+        "GPT 4.1": "openai/gpt-4.1",
+        "Gemini 2.5 Pro": "google/gemini-2.5-pro",
+        "Grok 4": "x-ai/grok-4",
+    },
+    "dataset": {
+        "path": "data/scenarios/reddit_questions.json",
+        "start": 0,
+        "count": 1000,
+        "shuffle": True,
+        "shuffle_seed": 42,
+    },
+    "constitution": {
+        "path": "data/constitutions/kindness.json",
+        "num_criteria": 8,
+    },
+    "collection": {
+        "enabled": True,
+        "cached_responses_path": "data/responses/shared_cache.jsonl",
+        "allow_ties": True,
+        "group_size": 4,
+        "groups": 2,
+        "sampler_mode": "random_judge_group",
+    },
+    "training": {
+        "enabled": True,
+        "model": "btd_ties",
+        "dims": [2, 4, 8],
+        "lr": 1e-3,
+        "max_epochs": 1000,
+        "batch_size": 32,
+        "test_size": 0.2,
+        "group_split": True,
+    },
+}
+```
+</CodeGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Datasets" icon="table" href="/guides/datasets">
+    Configure scenario datasets and slicing
+  </Card>
+  <Card title="Collection" icon="database" href="/guides/collection">
+    Control evaluation sampling and collection
+  </Card>
+  <Card title="Training" icon="chart-line" href="/guides/training">
+    Configure BT/BTD model training
+  </Card>
+  <Card title="Outputs" icon="file-chart-line" href="/guides/outputs">
+    Understand output files and visualizations
+  </Card>
+</CardGroup>

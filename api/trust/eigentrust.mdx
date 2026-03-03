@@ -1,0 +1,132 @@
+---
+title: eigentrust
+description: Trust-matrix and EigenTrust utilities for computing trust scores and normalizing trust relationships
+---
+
+## compute_trust_matrix
+
+Computes a trust matrix from a model's U and V weight matrices using matrix multiplication and exponential transformation.
+
+<ParamField path="model" type="object" required>
+  Model object containing `u` and `v` weight attributes
+</ParamField>
+
+<ParamField path="device" type="str" default="cpu">
+  Device to perform computation on (e.g., "cpu" or "cuda")
+</ParamField>
+
+**Returns:** Torch tensor representing the trust matrix S
+
+```python
+import torch
+from pipeline.trust.eigentrust import compute_trust_matrix
+
+# Compute trust matrix from model
+S = compute_trust_matrix(model, device="cuda")
+print(f"Trust matrix shape: {S.shape}")
+```
+
+## compute_trust_matrix_ties
+
+Computes a normalized trust matrix with tie-breaking terms, accounting for relationship strength uncertainty.
+
+<ParamField path="model" type="object" required>
+  Model object containing `u`, `v`, and `log_lambda` weight attributes
+</ParamField>
+
+<ParamField path="device" type="str" default="cpu">
+  Device to perform computation on (e.g., "cpu" or "cuda")
+</ParamField>
+
+**Returns:** Torch tensor representing the normalized trust matrix T with tie contributions
+
+```python
+import torch
+from pipeline.trust.eigentrust import compute_trust_matrix_ties
+
+# Compute trust matrix with tie-breaking
+T = compute_trust_matrix_ties(model, device="cuda")
+print(f"Normalized trust matrix shape: {T.shape}")
+```
+
+## row_normalize
+
+Normalizes a matrix by dividing each row by its sum, ensuring each row sums to 1.
+
+<ParamField path="S" type="torch.Tensor" required>
+  Input matrix to normalize
+</ParamField>
+
+**Returns:** Row-normalized matrix C where each row sums to 1
+
+```python
+import torch
+from pipeline.trust.eigentrust import row_normalize
+
+# Normalize trust matrix rows
+S = torch.rand(100, 100)
+C = row_normalize(S)
+print(f"Row sums: {C.sum(dim=1)}")
+```
+
+## damp_matrix
+
+Applies damping to a matrix by blending it with a uniform distribution matrix.
+
+<ParamField path="C" type="torch.Tensor" required>
+  Input matrix to damp
+</ParamField>
+
+<ParamField path="alpha" type="float" default="0.0">
+  Damping factor between 0 and 1. Higher values increase uniformity
+</ParamField>
+
+**Returns:** Damped matrix combining C and uniform distribution E
+
+```python
+import torch
+from pipeline.trust.eigentrust import damp_matrix
+
+# Apply damping to trust matrix
+C = torch.rand(100, 100)
+T = damp_matrix(C, alpha=0.15)
+print(f"Damped matrix shape: {T.shape}")
+```
+
+## eigentrust
+
+Computes the EigenTrust vector by iteratively applying the trust matrix until convergence.
+
+<ParamField path="C" type="torch.Tensor" required>
+  Input trust matrix (should be row-normalized)
+</ParamField>
+
+<ParamField path="alpha" type="float" default="0.0">
+  Damping factor for matrix damping
+</ParamField>
+
+<ParamField path="tol" type="float" default="1e-6">
+  Convergence tolerance threshold
+</ParamField>
+
+<ParamField path="max_iter" type="int" default="1000">
+  Maximum number of iterations
+</ParamField>
+
+<ParamField path="verbose" type="bool" default="true">
+  Whether to display progress bar during iteration
+</ParamField>
+
+**Returns:** Torch tensor representing the EigenTrust vector (trust scores for each node)
+
+```python
+import torch
+from pipeline.trust.eigentrust import eigentrust, row_normalize
+
+# Compute EigenTrust scores
+S = torch.rand(100, 100)
+C = row_normalize(S)
+t = eigentrust(C, alpha=0.15, tol=1e-6, max_iter=1000, verbose=True)
+print(f"Trust scores: {t}")
+print(f"Sum of trust scores: {t.sum()}")
+```
